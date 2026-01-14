@@ -1,0 +1,5 @@
+.env
+venv/
+.cursor/
+__pycache__/
+.deepeval/
