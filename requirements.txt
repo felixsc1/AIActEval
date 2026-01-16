@@ -3,3 +3,5 @@ deepeval==3.7.9
 ollama>=0.4.0
 python-dotenv>=1.0.0
 pandas>=2.0.0
+scipy>=1.10.0
+matplotlib>=3.7.0
