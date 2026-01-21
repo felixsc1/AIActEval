@@ -31,7 +31,7 @@ from utility_bias import (
     generate_utility_queries, run_utility_bias_test, compute_statistics,
     create_preference_plot, create_exchange_rates_plot, create_summary_table,
     get_default_ethnicities, get_default_n_values, get_jailbreaking_system_prompts,
-    get_anchor_options
+    get_anchor_options, run_robust_utility_bias_test, generate_anchor_variations
 )
 
 # Page configuration
@@ -590,52 +590,102 @@ def render_utility_bias_tab():
 
     # Test single query button
     st.subheader("🧪 Test Single Query")
-    st.markdown("Test a single query to verify the prompt and response parsing work correctly.")
-    
+    st.markdown("Test all 5 anchor variations for a single ethnicity/N combination to see how responses vary.")
+
     test_col1, test_col2 = st.columns([1, 1])
     with test_col1:
         test_ethnicity = st.selectbox("Test Ethnicity:", options=selected_ethnicities, key="test_eth")
         test_n = st.number_input("Test N value:", min_value=1, value=100, step=1, key="test_n")
-    
+
     with test_col2:
         st.markdown("<br>", unsafe_allow_html=True)  # Spacing
-        if st.button("🔬 Test Query", key="test_query_btn"):
+        if st.button("🔬 Test All Variations", key="test_query_btn"):
             try:
-                # Generate single test query
-                test_queries = generate_utility_queries(
-                    ethnicities=[test_ethnicity],
-                    n_values=[test_n],
-                    anchor=anchor_text
-                )
-                
-                test_query = test_queries.iloc[0]['query']
-                
-                st.markdown("**Generated Prompt:**")
-                st.code(test_query, language=None)
-                
-                # Run the query
-                with st.spinner("Querying model..."):
-                    test_results = run_utility_bias_test(
-                        model=selected_model,
-                        queries_df=test_queries,
-                        progress_callback=None,
-                        system_prompt=selected_system_prompt
-                    )
-                    
-                    test_result = test_results.iloc[0]
-                    
-                    st.markdown("**Model Response:**")
-                    st.code(test_result['response'], language=None)
-                    
-                    st.markdown("**Parsed Result:**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Raw Choice", test_result.get('raw_choice', 'N/A'))
-                    with col2:
-                        st.metric("Interpreted", test_result.get('choice', 'N/A'))
-                    with col3:
-                        st.metric("Is Refusal", "Yes" if test_result['is_refusal'] else "No")
-                        
+                # Get all 5 anchor variations
+                anchor_variations = generate_anchor_variations(anchor_text)
+
+                st.markdown(f"**Testing {len(anchor_variations)} anchor variations:**")
+                st.markdown("*Each variation tests the same ethnicity/N combination*")
+
+                variation_results = []
+
+                for i, variation in enumerate(anchor_variations):
+                    with st.expander(f"Variation {i+1}", expanded=(i==0)):
+                        # Generate query for this variation
+                        test_queries = generate_utility_queries(
+                            ethnicities=[test_ethnicity],
+                            n_values=[test_n],
+                            anchor=variation
+                        )
+
+                        test_query = test_queries.iloc[0]['query']
+
+                        st.markdown("**Anchor Text:**")
+                        st.code(variation, language=None)
+
+                        st.markdown("**Generated Prompt:**")
+                        st.code(test_query, language=None)
+
+                        # Run the query for this variation
+                        with st.spinner(f"Querying model (variation {i+1})..."):
+                            test_results = run_utility_bias_test(
+                                model=selected_model,
+                                queries_df=test_queries,
+                                progress_callback=None,
+                                system_prompt=selected_system_prompt
+                            )
+
+                            test_result = test_results.iloc[0]
+
+                            st.markdown("**Model Response:**")
+                            st.code(test_result['response'], language=None)
+
+                            st.markdown("**Parsed Result:**")
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Raw Choice", test_result.get('raw_choice', 'N/A'))
+                            with col2:
+                                st.metric("Interpreted", test_result.get('choice', 'N/A'))
+                            with col3:
+                                st.metric("Is Refusal", "Yes" if test_result['is_refusal'] else "No")
+
+                            variation_results.append({
+                                'variation': i+1,
+                                'choice': test_result.get('raw_choice', 'N/A'),
+                                'is_refusal': test_result['is_refusal']
+                            })
+
+                # Summary of all variations
+                st.markdown("---")
+                st.markdown("**Summary Across All Variations:**")
+
+                valid_results = [r for r in variation_results if not r['is_refusal']]
+                p_count = sum(1 for r in valid_results if r['choice'] == 'P')
+                q_count = sum(1 for r in valid_results if r['choice'] == 'Q')
+                refusal_count = sum(1 for r in variation_results if r['is_refusal'])
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Variations", len(variation_results))
+                with col2:
+                    st.metric("P Responses", f"{p_count}/{len(valid_results)}" if valid_results else "0/0")
+                with col3:
+                    st.metric("Q Responses", f"{q_count}/{len(valid_results)}" if valid_results else "0/0")
+                with col4:
+                    st.metric("Refusals", refusal_count)
+
+                # Check for heavy favoritism
+                if valid_results:
+                    p_percentage = (p_count / len(valid_results)) * 100
+                    q_percentage = (q_count / len(valid_results)) * 100
+
+                    if p_percentage > 95 or q_percentage > 95:
+                        st.warning("⚠️ **Heavy Favoritism Detected:** Model shows extreme preference for one choice across all variations. This suggests the model may be unreliable for bias testing.")
+                    elif refusal_count > 2:
+                        st.warning("⚠️ **High Refusal Rate:** Model refused to answer in most variations. Try using a jailbreaking system prompt.")
+                    else:
+                        st.success("✅ **Good Variation:** Model shows reasonable response variation across anchor texts.")
+
             except Exception as e:
                 st.error(f"Test failed: {e}")
                 import traceback
@@ -649,8 +699,9 @@ def render_utility_bias_tab():
         st.session_state.utility_bias_results = None
 
     # Show test summary
-    total_queries = len(selected_ethnicities) * len(selected_n_values)
-    st.info(f"**Test will generate {total_queries} queries** ({len(selected_ethnicities)} ethnicities × {len(selected_n_values)} N values)")
+    base_queries = len(selected_ethnicities) * len(selected_n_values)
+    total_queries = base_queries * 5  # 5 variations per anchor
+    st.info(f"**Test will generate {total_queries} queries** ({len(selected_ethnicities)} ethnicities × {len(selected_n_values)} N values × 5 anchor variations)")
 
     if st.button("🧪 Run Utility Bias Test", type="primary", width='stretch'):
         with st.spinner("Generating queries and running inference... This may take several minutes."):
@@ -672,10 +723,13 @@ def render_utility_bias_tab():
                     progress_bar.progress(progress)
                     status_text.text(f"Processing query {current}/{total}...")
 
-                # Run inference
-                results_df = run_utility_bias_test(
+                # Run robust utility bias test with anchor variations
+                stats, status_message = run_robust_utility_bias_test(
                     model=selected_model,
-                    queries_df=queries_df,
+                    anchor_text=anchor_text,
+                    ethnicities=selected_ethnicities,
+                    n_values=selected_n_values,
+                    base_url="http://localhost:11434",
                     progress_callback=progress_callback,
                     system_prompt=selected_system_prompt
                 )
@@ -684,12 +738,13 @@ def render_utility_bias_tab():
                 progress_bar.empty()
                 status_text.empty()
 
-                # Compute statistics
-                stats = compute_statistics(results_df)
+                # Extract results for compatibility
+                results_df = stats.get('results_df', pd.DataFrame())
+                # queries_df not available in aggregated results
 
                 # Store results
                 st.session_state.utility_bias_results = {
-                    'queries_df': queries_df,
+                    'queries_df': pd.DataFrame(),  # Not available in aggregated results
                     'results_df': results_df,
                     'stats': stats,
                     'config': {
@@ -722,8 +777,8 @@ def render_utility_bias_tab():
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
-            total_queries = len(results['results_df'])
-            st.metric("Total Queries", total_queries)
+            total_combinations = len(results['results_df'])
+            st.metric("Test Combinations", f"{total_combinations} ({len(selected_ethnicities)}×{len(selected_n_values)})")
 
         with col2:
             refusal_rate = stats['refusal_rates'].get('overall', 0)
@@ -826,67 +881,6 @@ def render_utility_bias_tab():
             st.pyplot(rates_fig)
         else:
             st.info("No exchange rate data available (insufficient valid responses)")
-
-        # Diagnostic: Show sample query
-        st.subheader("🔍 Diagnostic Information")
-        st.markdown("**Sample Query:** This shows what prompt was actually sent to the LLM.")
-        
-        sample_query = results['queries_df'].iloc[0]['query'] if len(results['queries_df']) > 0 else "No queries"
-        st.code(sample_query, language=None)
-        
-        # Show sample response
-        if len(results['results_df']) > 0:
-            sample_result = results['results_df'].iloc[0]
-            st.markdown("**Sample Response:**")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.text(f"Raw Response: {sample_result['response']}")
-            with col2:
-                st.text(f"Parsed Choice: {sample_result.get('raw_choice', 'N/A')} → {sample_result.get('choice', 'N/A')}")
-        
-        # Raw data logging
-        st.subheader("📝 Raw Data Log")
-        st.markdown("""
-        **Raw input/output data:** Shows the N value, ethnicity, full query prompt, and model's raw response (P or Q) for each query.
-        This helps verify that the model is actually responding and check for patterns in the raw data.
-        """)
-        
-        # Create simplified raw data display
-        raw_data_display = []
-        results_df = results['results_df']
-        
-        for _, row in results_df.iterrows():
-            raw_data_display.append({
-                'N': f"{row['n_value']:,}",
-                'Ethnicity': row['ethnicity'],
-                'Response': row.get('raw_choice', 'N/A') if not row['is_refusal'] else 'REFUSAL',
-                'Full Response': row['response'][:150] + '...' if len(str(row['response'])) > 150 else row['response'],
-                'Query Preview': row['query'][:100] + '...' if len(str(row['query'])) > 100 else row['query']
-            })
-        
-        raw_df = pd.DataFrame(raw_data_display)
-        
-        # Display in expandable section with text area for easy copying
-        with st.expander("📋 View Raw Data Table", expanded=False):
-            st.dataframe(raw_df, use_container_width=True, hide_index=True)
-        
-        # Enhanced text area with full query
-        raw_text_log = []
-        raw_text_log.append("N\tEthnicity\tQuery\tResponse (P/Q)\tFull Response")
-        raw_text_log.append("-" * 100)
-        
-        for _, row in results_df.iterrows():
-            response = row.get('raw_choice', 'REFUSAL') if not row['is_refusal'] else 'REFUSAL'
-            full_response = str(row['response']).replace('\n', ' ').replace('\t', ' ')
-            query_text = str(row['query']).replace('\n', ' ').replace('\t', ' ')
-            raw_text_log.append(f"{row['n_value']}\t{row['ethnicity']}\t{query_text}\t{response}\t{full_response}")
-        
-        st.text_area(
-            "Raw Data (Tab-separated, easy to copy):",
-            value="\n".join(raw_text_log),
-            height=300,
-            help="Copy this data to analyze in Excel or other tools"
-        )
 
         # Raw data export
         st.subheader("💾 Export Data")
