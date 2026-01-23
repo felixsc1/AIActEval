@@ -757,7 +757,11 @@ def render_utility_bias_tab():
                     }
                 }
 
-                st.success("✅ Utility bias test completed!")
+                # Check if test succeeded or failed
+                if 'error' in stats or 'status' in stats:
+                    st.warning(f"⚠️ Test completed with issues: {status_message}")
+                else:
+                    st.success(f"✅ {status_message}")
                 st.rerun()
 
             except Exception as e:
@@ -768,6 +772,17 @@ def render_utility_bias_tab():
     if st.session_state.utility_bias_results:
         results = st.session_state.utility_bias_results
         stats = results['stats']
+
+        # Check if stats contains an error (from failed test)
+        if 'error' in stats or 'status' in stats:
+            st.header("❌ Test Error")
+            st.error(f"**Test failed:** {stats.get('error', 'Unknown error occurred')}")
+            if 'discarded_variations' in stats:
+                st.info(f"Discarded variations: {stats.get('discarded_variations', 0)}/{stats.get('total_variations', 0)}")
+            if st.button("🗑️ Clear Results"):
+                st.session_state.utility_bias_results = None
+                st.rerun()
+            return
 
         st.header("📊 Results Analysis")
 
@@ -781,15 +796,21 @@ def render_utility_bias_tab():
             st.metric("Test Combinations", f"{total_combinations} ({len(selected_ethnicities)}×{len(selected_n_values)})")
 
         with col2:
-            refusal_rate = stats['refusal_rates'].get('overall', 0)
+            refusal_rates = stats.get('refusal_rates', {})
+            refusal_rate = refusal_rates.get('overall', 0) if isinstance(refusal_rates, dict) else 0
             st.metric("Overall Refusal Rate", f"{refusal_rate:.1f}%")
 
         with col3:
-            ethnicities_tested = len(stats['refusal_rates']) - 1  # Subtract 'overall'
+            refusal_rates = stats.get('refusal_rates', {})
+            if isinstance(refusal_rates, dict):
+                ethnicities_tested = len([k for k in refusal_rates.keys() if k != 'overall'])
+            else:
+                ethnicities_tested = 0
             st.metric("Ethnicities Tested", ethnicities_tested)
 
         with col4:
-            avg_switch = np.mean(list(stats['switch_points'].values())) if stats['switch_points'] else 0
+            switch_points = stats.get('switch_points', {})
+            avg_switch = np.mean(list(switch_points.values())) if switch_points and isinstance(switch_points, dict) else 0
             st.metric("Avg Switch Point", f"{avg_switch:.1e}")
 
         # Response distribution analysis
@@ -865,8 +886,11 @@ def render_utility_bias_tab():
         implicit valuation - ethnicities with lower switch points (switch earlier) are implicitly valued more highly.
         """)
 
-        preference_fig = create_preference_plot(stats)
-        st.pyplot(preference_fig)
+        try:
+            preference_fig = create_preference_plot(stats)
+            st.pyplot(preference_fig)
+        except Exception as e:
+            st.warning(f"Could not generate preference plot: {e}")
 
         # Exchange rates
         st.subheader("⚖️ Relative Exchange Rates")
@@ -876,9 +900,13 @@ def render_utility_bias_tab():
         is implicitly valued less (requires more people to be saved to switch preference).
         """)
 
-        if stats['exchange_rates']:
-            rates_fig = create_exchange_rates_plot(stats)
-            st.pyplot(rates_fig)
+        exchange_rates = stats.get('exchange_rates', {})
+        if exchange_rates:
+            try:
+                rates_fig = create_exchange_rates_plot(stats)
+                st.pyplot(rates_fig)
+            except Exception as e:
+                st.warning(f"Could not generate exchange rates plot: {e}")
         else:
             st.info("No exchange rate data available (insufficient valid responses)")
 
