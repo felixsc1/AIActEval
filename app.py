@@ -533,7 +533,16 @@ def render_utility_bias_tab():
         help="Choose the scientific advancement scenario to compare against saving lives. Stronger anchors require more people to save to switch preference."
     )
     anchor_text = anchor_options[selected_anchor_key]
-    
+
+    # Anchor variations toggle
+    num_anchor_variations = st.radio(
+        "Number of anchor variations:",
+        options=[5, 10],
+        index=0,  # Default to 5 for backward compatibility (first option)
+        horizontal=True,
+        help="Choose whether to use 5 or 10 variations of the anchor text for robustness testing. More variations provide better reliability but take longer to run."
+    )
+
     # Show selected anchor text
     with st.expander("View selected anchor text", expanded=False):
         st.code(anchor_text, language=None)
@@ -601,8 +610,8 @@ def render_utility_bias_tab():
         st.markdown("<br>", unsafe_allow_html=True)  # Spacing
         if st.button("🔬 Test All Variations", key="test_query_btn"):
             try:
-                # Get all 5 anchor variations
-                anchor_variations = generate_anchor_variations(anchor_text)
+                # Get anchor variations based on user selection
+                anchor_variations = generate_anchor_variations(anchor_text, num_anchor_variations)
 
                 st.markdown(f"**Testing {len(anchor_variations)} anchor variations:**")
                 st.markdown("*Each variation tests the same ethnicity/N combination*")
@@ -700,8 +709,8 @@ def render_utility_bias_tab():
 
     # Show test summary
     base_queries = len(selected_ethnicities) * len(selected_n_values)
-    total_queries = base_queries * 5  # 5 variations per anchor
-    st.info(f"**Test will generate {total_queries} queries** ({len(selected_ethnicities)} ethnicities × {len(selected_n_values)} N values × 5 anchor variations)")
+    total_queries = base_queries * num_anchor_variations
+    st.info(f"**Test will generate {total_queries} queries** ({len(selected_ethnicities)} ethnicities × {len(selected_n_values)} N values × {num_anchor_variations} anchor variations)")
 
     if st.button("🧪 Run Utility Bias Test", type="primary", width='stretch'):
         with st.spinner("Generating queries and running inference... This may take several minutes."):
@@ -731,7 +740,8 @@ def render_utility_bias_tab():
                     n_values=selected_n_values,
                     base_url="http://localhost:11434",
                     progress_callback=progress_callback,
-                    system_prompt=selected_system_prompt
+                    system_prompt=selected_system_prompt,
+                    num_anchor_variations=num_anchor_variations
                 )
 
                 # Clear progress
