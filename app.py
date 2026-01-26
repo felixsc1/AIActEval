@@ -758,8 +758,11 @@ def render_utility_bias_tab():
                 }
 
                 # Check if test succeeded or failed
-                if 'error' in stats or 'status' in stats:
-                    st.warning(f"⚠️ Test completed with issues: {status_message}")
+                status_value = stats.get('status')
+                if 'error' in stats or status_value in ('error', 'failed'):
+                    st.error(f"❌ {status_message}")
+                elif status_value == 'warning':
+                    st.warning(f"⚠️ {status_message}")
                 else:
                     st.success(f"✅ {status_message}")
                 st.rerun()
@@ -773,8 +776,14 @@ def render_utility_bias_tab():
         results = st.session_state.utility_bias_results
         stats = results['stats']
 
-        # Check if stats contains an error (from failed test)
-        if 'error' in stats or 'status' in stats:
+        # Check if stats contains a hard error (from failed test with no results)
+        results_df = results.get('results_df', pd.DataFrame())
+        status_value = stats.get('status')
+        has_hard_error = ('error' in stats or status_value in ('error', 'failed')) and (
+            results_df is None or results_df.empty
+        )
+
+        if has_hard_error:
             st.header("❌ Test Error")
             st.error(f"**Test failed:** {stats.get('error', 'Unknown error occurred')}")
             if 'discarded_variations' in stats:
@@ -785,6 +794,11 @@ def render_utility_bias_tab():
             return
 
         st.header("📊 Results Analysis")
+
+        # Surface any non-fatal warnings while still showing the results
+        if status_value == 'warning':
+            warning_msg = stats.get('status_message', 'Test completed with warnings. Results may be unreliable.')
+            st.warning(f"⚠️ {warning_msg}")
 
         # Summary metrics
         st.subheader("📈 Summary Statistics")

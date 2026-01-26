@@ -885,25 +885,44 @@ def run_robust_utility_bias_test(
         )
 
         # Step 2: Aggregate results (handles error cases internally)
+        # If aggregation fails because all variations are heavily skewed, we
+        # fall back to showing the raw variation results with a strong warning
+        # instead of hiding the data completely.
         try:
             aggregated_df, aggregation_metadata = aggregate_variation_results(
                 results_list, skewed_flags, favoritism_scores
             )
         except ValueError as e:
-            # No usable variations found
-            return {
-                'error': str(e),
-                'status': 'failed',
-                'discarded_variations': sum(skewed_flags),
-                'total_variations': len(skewed_flags),
+            total_variations = len(results_list)
+            discarded = sum(skewed_flags)
+
+            # Combine all raw variation results so downstream stats/plots still work
+            if results_list:
+                aggregated_df = pd.concat(results_list, ignore_index=True)
+            else:
+                aggregated_df = pd.DataFrame()
+
+            aggregation_metadata = {
+                'total_variations': total_variations,
+                'usable_variations': 0,
+                'discarded_variations': discarded,
+                'discarded_indices': [i for i, flag in enumerate(skewed_flags) if flag],
+                'usable_indices': [i for i, flag in enumerate(skewed_flags) if not flag],
+                'warning': str(e),
+                'all_variations_heavily_skewed': True,
                 'favoritism_scores': favoritism_scores
-            }, f"Test failed: {str(e)}"
+            }
 
         # Step 3: Compute statistics
         stats = compute_statistics(aggregated_df)
 
         # Add aggregation metadata to stats
         stats['aggregation_metadata'] = aggregation_metadata
+
+        # If no usable variations were found, mark the stats as a warning
+        # so the UI can surface this clearly while still showing results.
+        if aggregation_metadata.get('usable_variations', 0) == 0:
+            stats['status'] = 'warning'
 
         # Step 4: Generate plots
         try:
@@ -919,7 +938,8 @@ def run_robust_utility_bias_test(
             stats['plot_error'] = str(e)
 
         # Step 5: Add results DataFrames for compatibility
-        # Note: These are the aggregated results, not the individual variation results
+        # Note: These are the aggregated results (or raw fallback data), not the
+        # individual variation results separately.
         stats['results_df'] = aggregated_df
         stats['queries_df'] = pd.DataFrame()  # Not available in aggregated form
 
@@ -932,15 +952,29 @@ def run_robust_utility_bias_test(
         total_variations = aggregation_metadata.get('total_variations', 1)
         discarded = aggregation_metadata.get('discarded_variations', 0)
 
-        if usable_variations == 1:
-            status_msg = (f"Test completed with limited robustness. Only 1 out of {total_variations} "
-                         "anchor variations was usable. Results may be less reliable.")
+        if usable_variations == 0 and total_variations > 0:
+            status_msg = (
+                "Test completed but all anchor variations were heavily skewed. "
+                "Results are shown for debugging only and are not reliable for bias conclusions."
+            )
+        elif usable_variations == 1:
+            status_msg = (
+                f"Test completed with limited robustness. Only 1 out of {total_variations} "
+                "anchor variations was usable. Results may be less reliable."
+            )
         elif usable_variations < total_variations:
-            status_msg = (f"Test completed with good robustness. Used {usable_variations} out of "
-                         f"{total_variations} anchor variations ({discarded} discarded as heavily skewed).")
+            status_msg = (
+                f"Test completed with good robustness. Used {usable_variations} out of "
+                f"{total_variations} anchor variations ({discarded} discarded as heavily skewed)."
+            )
         else:
-            status_msg = (f"Test completed with excellent robustness. All {total_variations} "
-                         "anchor variations were usable and aggregated.")
+            status_msg = (
+                f"Test completed with excellent robustness. All {total_variations} "
+                "anchor variations were usable and aggregated."
+            )
+
+        # Store the status message in stats for downstream display
+        stats['status_message'] = status_msg
 
         return stats, status_msg
 
