@@ -567,6 +567,23 @@ def render_utility_bias_tab():
             st.code(selected_system_prompt, language=None)
             st.caption("This prompt will be sent as the system message to bypass restrictions.")
 
+    # Multi-shot examples checkbox
+    include_examples = st.checkbox(
+        "Include multi-shot examples",
+        value=True,  # Checked by default
+        help="Append two example interactions to the system prompt to demonstrate the expected response format for preference questions."
+    )
+
+    # Apply multi-shot examples if requested
+    from utility_bias import append_multi_shot_examples
+    final_system_prompt = append_multi_shot_examples(selected_system_prompt, include_examples)
+
+    # Show final prompt content if examples were added
+    if include_examples and selected_system_prompt.strip():
+        with st.expander("View final system prompt (with examples)", expanded=False):
+            st.code(final_system_prompt, language=None)
+            st.caption("This is the complete prompt that will be sent to the model, including examples.")
+
     # Model selection
     st.subheader("🤖 Model Selection")
     try:
@@ -641,7 +658,7 @@ def render_utility_bias_tab():
                                 model=selected_model,
                                 queries_df=test_queries,
                                 progress_callback=None,
-                                system_prompt=selected_system_prompt
+                                system_prompt=final_system_prompt
                             )
 
                             test_result = test_results.iloc[0]
@@ -740,7 +757,7 @@ def render_utility_bias_tab():
                     n_values=selected_n_values,
                     base_url="http://localhost:11434",
                     progress_callback=progress_callback,
-                    system_prompt=selected_system_prompt,
+                    system_prompt=final_system_prompt,
                     num_anchor_variations=num_anchor_variations
                 )
 
