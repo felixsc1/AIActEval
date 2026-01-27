@@ -400,12 +400,101 @@ def parse_response(response: str, query_info: Dict[str, Any] = None) -> Dict[str
     return {'choice': preference, 'raw_choice': raw_choice, 'is_refusal': False}
 
 
+def unload_model(model: str, base_url: str = "http://localhost:11434") -> bool:
+    """
+    Unload a model from VRAM/memory to free up resources.
+    
+    This sends a generate request with keep_alive=0 which tells Ollama to
+    immediately unload the model after the request completes.
+    
+    Args:
+        model: Ollama model name to unload
+        base_url: Ollama server URL
+        
+    Returns:
+        True if unload succeeded, False otherwise
+    """
+    try:
+        client = ollama.Client(host=base_url)
+        # Send empty generate with keep_alive=0 to unload model
+        client.generate(
+            model=model,
+            prompt="",
+            keep_alive=0
+        )
+        return True
+    except Exception as e:
+        # Silently fail - model may not be loaded or other transient issue
+        print(f"Note: Could not unload model {model}: {e}")
+        return False
+
+
+def get_ollama_options(
+    num_ctx: int = 2048,
+    num_gpu: Optional[int] = None,
+    temperature: float = 0
+) -> Dict[str, Any]:
+    """
+    Build Ollama options dict with performance optimizations.
+    
+    Args:
+        num_ctx: Context window size. Default 2048 is sufficient for our short prompts.
+                 Smaller values use less memory but may truncate long inputs.
+        num_gpu: Number of GPU layers. None = auto-detect, 0 = CPU only, 
+                 higher values = more GPU offloading (faster but more VRAM)
+        temperature: Response randomness. 0 = deterministic.
+        
+    Returns:
+        Options dict to pass to ollama.generate()
+    """
+    options = {
+        "temperature": temperature,
+        "num_ctx": num_ctx,
+    }
+    
+    # Only set num_gpu if explicitly specified
+    if num_gpu is not None:
+        options["num_gpu"] = num_gpu
+        
+    return options
+
+
+def is_gpu_oom_error(error: Exception) -> bool:
+    """
+    Check if an exception is likely a GPU out-of-memory error.
+    
+    Args:
+        error: The exception to check
+        
+    Returns:
+        True if this looks like a GPU OOM error
+    """
+    error_str = str(error).lower()
+    oom_indicators = [
+        "out of memory",
+        "oom",
+        "cuda error",
+        "cuda out of memory",
+        "cudamalloc failed",
+        "not enough memory",
+        "memory allocation failed",
+        "gpu memory",
+        "vram",
+        "insufficient memory"
+    ]
+    return any(indicator in error_str for indicator in oom_indicators)
+
+
 def run_utility_bias_test(
     model: str,
     queries_df: pd.DataFrame,
     base_url: str = "http://localhost:11434",
     progress_callback: Optional[callable] = None,
-    system_prompt: str = ""
+    system_prompt: str = "",
+    num_ctx: int = 2048,
+    num_gpu: Optional[int] = None,
+    cleanup_interval: int = 0,
+    gpu_fallback: bool = False
 ) -> pd.DataFrame:
     """
     Run utility bias test by querying Ollama model and parsing responses.
@@ -416,6 +505,10 @@ def run_utility_bias_test(
         base_url: Ollama server URL
         progress_callback: Optional callback for progress updates
         system_prompt: System prompt to use for all queries (for jailbreaking restrictive models)
+        num_ctx: Context window size (default 2048, sufficient for our prompts)
+        num_gpu: Number of GPU layers (None=auto, 0=CPU only, higher=more GPU)
+        cleanup_interval: Unload/reload model every N queries to prevent memory leaks (0=disabled)
+        gpu_fallback: If True and GPU OOM error occurs, automatically retry with CPU (num_gpu=0)
 
     Returns:
         DataFrame with results: query, ethnicity, n_value, response, choice, is_refusal, log_n
@@ -426,10 +519,33 @@ def run_utility_bias_test(
         raise Exception(f"Failed to connect to Ollama at {base_url}: {e}")
 
     results = []
+    
+    # Track if we've fallen back to CPU
+    using_cpu_fallback = False
+    
+    # Build optimized options
+    ollama_options = get_ollama_options(
+        num_ctx=num_ctx,
+        num_gpu=num_gpu,
+        temperature=0  # Deterministic responses for consistent preference curves
+    )
+    
+    # Build CPU fallback options (only used if gpu_fallback=True and OOM occurs)
+    cpu_options = get_ollama_options(
+        num_ctx=num_ctx,
+        num_gpu=0,  # Force CPU
+        temperature=0
+    )
 
     for i, (_, row) in enumerate(queries_df.iterrows()):
         if progress_callback:
             progress_callback(i + 1, len(queries_df))
+            
+        # Periodic cleanup to prevent memory leaks during long runs
+        if cleanup_interval > 0 and i > 0 and i % cleanup_interval == 0:
+            unload_model(model, base_url)
+            # Small delay to allow memory to be freed
+            time.sleep(0.5)
 
         try:
             # Generate response
@@ -438,22 +554,36 @@ def run_utility_bias_test(
             if not prompt_to_send or len(prompt_to_send.strip()) == 0:
                 raise ValueError(f"Empty prompt for ethnicity={row['ethnicity']}, n={row['n_value']}")
             
+            # Use CPU options if we've already fallen back
+            current_options = cpu_options if using_cpu_fallback else ollama_options
+            
             # Prepare generate call with optional system prompt
-            # Set temperature=0 for deterministic responses to ensure monotonic preference curves
-            # Without this, identical prompts can get different responses, causing non-monotonic behavior
+            # Uses optimized options including smaller context window and optional GPU settings
             generate_kwargs = {
                 "model": model,
                 "prompt": prompt_to_send,
                 "stream": False,
-                "options": {
-                    "temperature": 0  # Deterministic responses for consistent preference curves
-                }
+                "options": current_options
             }
 
             if system_prompt.strip():
                 generate_kwargs["system"] = system_prompt
 
-            response_obj = client.generate(**generate_kwargs)
+            try:
+                response_obj = client.generate(**generate_kwargs)
+            except Exception as gen_error:
+                # Check if this is a GPU OOM error and we can fall back
+                if gpu_fallback and not using_cpu_fallback and is_gpu_oom_error(gen_error):
+                    print(f"GPU out of memory detected, falling back to CPU mode...")
+                    using_cpu_fallback = True
+                    # Unload the model to free GPU memory before retrying
+                    unload_model(model, base_url)
+                    time.sleep(1)  # Give time for memory to be freed
+                    # Retry with CPU options
+                    generate_kwargs["options"] = cpu_options
+                    response_obj = client.generate(**generate_kwargs)
+                else:
+                    raise  # Re-raise if not OOM or fallback not enabled
             
             # Extract response - handle different possible response formats
             # Ollama can return a dict, or an object with a .response attribute
@@ -480,7 +610,8 @@ def run_utility_bias_test(
                 'choice': parse_result['choice'],
                 'raw_choice': parse_result.get('raw_choice'),  # Store raw P/Q
                 'is_refusal': parse_result['is_refusal'],
-                'log_n': np.log10(row['n_value']) if row['n_value'] > 0 else 0
+                'log_n': np.log10(row['n_value']) if row['n_value'] > 0 else 0,
+                'used_cpu_fallback': using_cpu_fallback  # Track if CPU fallback was used
             }
 
             results.append(result)
@@ -703,7 +834,11 @@ def run_utility_bias_test_with_variations(
     base_url: str = "http://localhost:11434",
     progress_callback: Optional[callable] = None,
     system_prompt: str = "",
-    num_anchor_variations: int = 5
+    num_anchor_variations: int = 5,
+    num_ctx: int = 2048,
+    num_gpu: Optional[int] = None,
+    cleanup_interval: int = 0,
+    gpu_fallback: bool = False
 ) -> Tuple[List[pd.DataFrame], List[bool], List[Dict[str, float]]]:
     """
     Run utility bias test with anchor variations to improve robustness against
@@ -719,6 +854,10 @@ def run_utility_bias_test_with_variations(
         progress_callback: Optional callback for progress updates
         num_anchor_variations: Number of anchor variations to use (5 or 10)
         system_prompt: System prompt to use for all queries
+        num_ctx: Context window size (default 2048, sufficient for our prompts)
+        num_gpu: Number of GPU layers (None=auto, 0=CPU only, higher=more GPU)
+        cleanup_interval: Unload/reload model every N queries to prevent memory leaks (0=disabled)
+        gpu_fallback: If True and GPU OOM error occurs, automatically retry with CPU
 
     Returns:
         Tuple of (results_list, skewed_flags, favoritism_scores)
@@ -766,7 +905,11 @@ def run_utility_bias_test_with_variations(
                 queries_df=queries_df,
                 base_url=base_url,
                 progress_callback=variation_progress,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
+                num_ctx=num_ctx,
+                num_gpu=num_gpu,
+                cleanup_interval=cleanup_interval,
+                gpu_fallback=gpu_fallback
             )
 
             # Add variation metadata
@@ -927,7 +1070,11 @@ def run_robust_utility_bias_test(
     base_url: str = "http://localhost:11434",
     progress_callback: Optional[callable] = None,
     system_prompt: str = "",
-    num_anchor_variations: int = 5
+    num_anchor_variations: int = 5,
+    num_ctx: int = 2048,
+    num_gpu: Optional[int] = None,
+    cleanup_interval: int = 100,
+    gpu_fallback: bool = False
 ) -> Tuple[Dict[str, Any], str]:
     """
     Run a robust utility bias test with automatic variation generation and aggregation.
@@ -942,6 +1089,10 @@ def run_robust_utility_bias_test(
         progress_callback: Optional callback for progress updates
         system_prompt: System prompt to use for all queries
         num_anchor_variations: Number of anchor variations to use (5 or 10)
+        num_ctx: Context window size (default 2048, sufficient for our prompts)
+        num_gpu: Number of GPU layers (None=auto, 0=CPU only, higher=more GPU)
+        cleanup_interval: Unload/reload model every N queries to prevent memory leaks (default 100)
+        gpu_fallback: If True and GPU OOM error occurs, automatically retry with CPU
 
     Returns:
         Tuple of (results, status_message)
@@ -958,7 +1109,11 @@ def run_robust_utility_bias_test(
             base_url=base_url,
             progress_callback=progress_callback,
             system_prompt=system_prompt,
-            num_anchor_variations=num_anchor_variations
+            num_anchor_variations=num_anchor_variations,
+            num_ctx=num_ctx,
+            num_gpu=num_gpu,
+            cleanup_interval=cleanup_interval,
+            gpu_fallback=gpu_fallback
         )
 
         # Step 2: Aggregate results (handles error cases internally)

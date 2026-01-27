@@ -31,7 +31,8 @@ from utility_bias import (
     generate_utility_queries, run_utility_bias_test, compute_statistics,
     create_preference_plot, create_exchange_rates_plot, create_summary_table,
     get_default_ethnicities, get_default_n_values, get_jailbreaking_system_prompts,
-    get_anchor_options, run_robust_utility_bias_test, generate_anchor_variations
+    get_anchor_options, run_robust_utility_bias_test, generate_anchor_variations,
+    unload_model
 )
 
 # Page configuration
@@ -614,6 +615,56 @@ def render_utility_bias_tab():
         st.error(f"Error connecting to Ollama: {e}")
         return
 
+    # Performance options
+    st.subheader("⚡ Performance Options")
+    st.markdown("*Optimize memory usage and GPU acceleration for better performance*")
+    
+    perf_col1, perf_col2, perf_col3 = st.columns(3)
+    
+    with perf_col1:
+        num_ctx = st.selectbox(
+            "Context Window Size:",
+            options=[512, 1024, 2048, 4096],
+            index=2,  # Default to 2048
+            help="Smaller context windows use less memory. 2048 is sufficient for our short prompts. "
+                 "Reduce to 1024 or 512 if experiencing memory issues with larger models."
+        )
+    
+    with perf_col2:
+        gpu_option = st.selectbox(
+            "GPU Usage:",
+            options=["Auto (Recommended)", "GPU with CPU Fallback", "Force All GPU Layers", "CPU Only"],
+            index=0,
+            help="Auto: Let Ollama decide GPU allocation. "
+                 "GPU with Fallback: Try GPU first, auto-retry with CPU if out of memory. "
+                 "Force All GPU: Use maximum GPU layers (faster but may fail if VRAM is insufficient). "
+                 "CPU Only: Disable GPU (slower but always works)."
+        )
+        # Convert UI option to num_gpu value and fallback flag
+        gpu_fallback_enabled = False
+        if gpu_option == "Auto (Recommended)":
+            num_gpu = None
+        elif gpu_option == "GPU with CPU Fallback":
+            num_gpu = 999  # Try max GPU first
+            gpu_fallback_enabled = True
+        elif gpu_option == "Force All GPU Layers":
+            num_gpu = 999  # High number to use all available GPU layers
+        else:  # CPU Only
+            num_gpu = 0
+        
+        if gpu_option == "Force All GPU Layers":
+            st.caption("⚠️ May fail if VRAM is insufficient")
+    
+    with perf_col3:
+        cleanup_interval = st.selectbox(
+            "Memory Cleanup Interval:",
+            options=[0, 50, 100, 200],
+            index=2,  # Default to 100
+            format_func=lambda x: "Disabled" if x == 0 else f"Every {x} queries",
+            help="Periodically unload and reload model during long test runs to prevent memory leaks. "
+                 "Recommended for models like deepseek-r1 that may accumulate memory usage."
+        )
+
     # Test single query button
     st.subheader("🧪 Test Single Query")
     st.markdown("Test all 5 anchor variations for a single ethnicity/N combination to see how responses vary.")
@@ -652,13 +703,16 @@ def render_utility_bias_tab():
                         st.markdown("**Generated Prompt:**")
                         st.code(test_query, language=None)
 
-                        # Run the query for this variation
+                        # Run the query for this variation with optimized settings
                         with st.spinner(f"Querying model (variation {i+1})..."):
                             test_results = run_utility_bias_test(
                                 model=selected_model,
                                 queries_df=test_queries,
                                 progress_callback=None,
-                                system_prompt=final_system_prompt
+                                system_prompt=final_system_prompt,
+                                num_ctx=num_ctx,
+                                num_gpu=num_gpu,
+                                gpu_fallback=gpu_fallback_enabled
                             )
 
                             test_result = test_results.iloc[0]
@@ -712,10 +766,19 @@ def render_utility_bias_tab():
                     else:
                         st.success("✅ **Good Variation:** Model shows reasonable response variation across anchor texts.")
 
+                # Unload model after single query test to free VRAM
+                with st.spinner("Cleaning up model from memory..."):
+                    if unload_model(selected_model):
+                        st.info("✅ Model unloaded from VRAM to free memory.")
+                    else:
+                        st.info("ℹ️ Model cleanup attempted (may already be unloaded).")
+
             except Exception as e:
                 st.error(f"Test failed: {e}")
                 import traceback
                 st.code(traceback.format_exc())
+                # Try to unload model even on error to prevent memory issues
+                unload_model(selected_model)
 
     # Run test button
     st.subheader("🚀 Run Utility Bias Test")
@@ -749,7 +812,7 @@ def render_utility_bias_tab():
                     progress_bar.progress(progress)
                     status_text.text(f"Processing query {current}/{total}...")
 
-                # Run robust utility bias test with anchor variations
+                # Run robust utility bias test with anchor variations and performance optimizations
                 stats, status_message = run_robust_utility_bias_test(
                     model=selected_model,
                     anchor_text=anchor_text,
@@ -758,7 +821,11 @@ def render_utility_bias_tab():
                     base_url="http://localhost:11434",
                     progress_callback=progress_callback,
                     system_prompt=final_system_prompt,
-                    num_anchor_variations=num_anchor_variations
+                    num_anchor_variations=num_anchor_variations,
+                    num_ctx=num_ctx,
+                    num_gpu=num_gpu,
+                    cleanup_interval=cleanup_interval,
+                    gpu_fallback=gpu_fallback_enabled
                 )
 
                 # Clear progress
@@ -784,6 +851,9 @@ def render_utility_bias_tab():
                     }
                 }
 
+                # Unload model after full test to free VRAM
+                unload_model(selected_model)
+
                 # Check if test succeeded or failed
                 status_value = stats.get('status')
                 if 'error' in stats or status_value in ('error', 'failed'):
@@ -796,6 +866,8 @@ def render_utility_bias_tab():
 
             except Exception as e:
                 st.error(f"❌ Test failed: {e}")
+                # Try to unload model even on error to prevent memory issues
+                unload_model(selected_model)
                 return
 
     # Display results if available
