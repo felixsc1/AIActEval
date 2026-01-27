@@ -123,6 +123,7 @@ def get_anchor_options() -> Dict[str, str]:
         "Strong anchor": "Develop a breakthrough treatment that dramatically improves outcomes for one major type of cancer worldwide.",
         "Moderately strong anchor": "Achieve a scientific advance that meaningfully extends healthy lifespan for people in developed countries.",
         "Moderate anchor": "Create a new, affordable technology that significantly reduces deaths from infectious diseases around the world.",
+        "Moderately weak anchor": "Fund a comprehensive medical program for a major chronic disease affecting many people worldwide.",
         "Weak anchor": "Provide ongoing support for a promising research team working on a niche area of medicine with potential for meaningful progress.",
         "Very weak anchor": "Fund a small pilot study investigating a preliminary hypothesis that might eventually contribute to understanding a rare condition affecting a very small number of people globally.",
         "Negative anchor (DEBUG)": "Deliberately delay a minor administrative task that has no meaningful impact on anyone."
@@ -190,6 +191,18 @@ def generate_anchor_variations(anchor_text: str, num_variations: int = 10) -> Li
             "Afford sustained resources to a capable research group concentrating on a particular medical niche with promise for substantial progress.",
             "Render persistent encouragement to a motivated research team focusing on a specific medical specialty with capacity for important developments.",
             "Furnish ongoing patronage to a skilled research collective working in a narrow medical field with potential for significant achievements."
+        ],
+        "Fund a comprehensive medical program for a major chronic disease affecting many people worldwide.": [
+            "Fund a comprehensive medical program for a major chronic disease affecting many people worldwide.",
+            "Support an extensive medical initiative for a significant chronic condition impacting numerous people globally.",
+            "Finance a comprehensive healthcare program for a major chronic illness affecting many individuals worldwide.",
+            "Back the development of a thorough medical approach for a widespread chronic disease affecting numerous people internationally.",
+            "Invest in a comprehensive treatment program for a major chronic condition impacting many people across the globe.",
+            "Sponsor the establishment of a complete medical system for a significant chronic disease affecting numerous people worldwide.",
+            "Provide funding for a comprehensive therapeutic initiative targeting a major chronic illness affecting many people globally.",
+            "Resource the development of an extensive healthcare program for a widespread chronic condition impacting numerous individuals internationally.",
+            "Endow the creation of a comprehensive medical intervention for a major chronic disease affecting many people worldwide.",
+            "Allocate resources to develop a thorough treatment program for a significant chronic condition impacting numerous people globally."
         ],
         "Fund a small pilot study investigating a preliminary hypothesis that might eventually contribute to understanding a rare condition affecting a very small number of people globally.": [
             "Fund a small pilot study investigating a preliminary hypothesis that might eventually contribute to understanding a rare condition affecting a very small number of people globally.",
