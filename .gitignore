@@ -3,3 +3,4 @@ venv/
 .cursor/
 __pycache__/
 .deepeval/
+/data/

@@ -24,6 +24,63 @@ import streamlit as st
 import re
 import time
 
+# Constants
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_NUM_CTX = 2048
+DEFAULT_TEMPERATURE = 0.0
+
+
+# Configuration classes for better type safety and future extensibility
+class UtilityBiasConfig:
+    """Configuration for utility bias tests."""
+
+    def __init__(
+        self,
+        ethnicities: List[str],
+        n_values: List[int],
+        anchor_key: str,
+        anchor_text: str,
+        num_anchor_variations: int = 5,
+        system_prompt_key: str = "Default (No system prompt)",
+        include_examples: bool = True,
+        performance: Optional[Dict[str, Any]] = None
+    ):
+        self.ethnicities = ethnicities
+        self.n_values = n_values
+        self.anchor_key = anchor_key
+        self.anchor_text = anchor_text
+        self.num_anchor_variations = num_anchor_variations
+        self.system_prompt_key = system_prompt_key
+        self.include_examples = include_examples
+        self.performance = performance or {
+            'num_ctx': DEFAULT_NUM_CTX,
+            'num_gpu': None,
+            'gpu_fallback': False,
+            'cleanup_interval': 100
+        }
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            'ethnicities': self.ethnicities,
+            'n_values': self.n_values,
+            'anchor_key': self.anchor_key,
+            'anchor_text': self.anchor_text,
+            'num_anchor_variations': self.num_anchor_variations,
+            'system_prompt_key': self.system_prompt_key,
+            'include_examples': self.include_examples,
+            'performance': self.performance
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'UtilityBiasConfig':
+        """Create from dictionary."""
+        return cls(**data)
+
+
+# ============================================================================
+# PUBLIC API
+# ============================================================================
 
 def format_number_readable(value: float) -> str:
     """
@@ -413,7 +470,11 @@ def parse_response(response: str, query_info: Dict[str, Any] = None) -> Dict[str
     return {'choice': preference, 'raw_choice': raw_choice, 'is_refusal': False}
 
 
-def unload_model(model: str, base_url: str = "http://localhost:11434") -> bool:
+# ============================================================================
+# INTERNAL FUNCTIONS
+# ============================================================================
+
+def unload_model(model: str, base_url: str = DEFAULT_OLLAMA_BASE_URL) -> bool:
     """
     Unload a model from VRAM/memory to free up resources.
     
@@ -443,9 +504,9 @@ def unload_model(model: str, base_url: str = "http://localhost:11434") -> bool:
 
 
 def get_ollama_options(
-    num_ctx: int = 2048,
+    num_ctx: int = DEFAULT_NUM_CTX,
     num_gpu: Optional[int] = None,
-    temperature: float = 0
+    temperature: float = DEFAULT_TEMPERATURE
 ) -> Dict[str, Any]:
     """
     Build Ollama options dict with performance optimizations.
@@ -501,7 +562,7 @@ def is_gpu_oom_error(error: Exception) -> bool:
 def run_utility_bias_test(
     model: str,
     queries_df: pd.DataFrame,
-    base_url: str = "http://localhost:11434",
+    base_url: str = DEFAULT_OLLAMA_BASE_URL,
     progress_callback: Optional[callable] = None,
     system_prompt: str = "",
     num_ctx: int = 2048,
@@ -844,7 +905,7 @@ def run_utility_bias_test_with_variations(
     anchor_text: str,
     ethnicities: List[str],
     n_values: List[int],
-    base_url: str = "http://localhost:11434",
+    base_url: str = DEFAULT_OLLAMA_BASE_URL,
     progress_callback: Optional[callable] = None,
     system_prompt: str = "",
     num_anchor_variations: int = 5,
@@ -1080,7 +1141,7 @@ def run_robust_utility_bias_test(
     anchor_text: str,
     ethnicities: List[str],
     n_values: List[int],
-    base_url: str = "http://localhost:11434",
+    base_url: str = DEFAULT_OLLAMA_BASE_URL,
     progress_callback: Optional[callable] = None,
     system_prompt: str = "",
     num_anchor_variations: int = 5,
