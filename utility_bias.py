@@ -515,12 +515,12 @@ def generate_anchor_variations(anchor_text: str, num_variations: int = 10) -> Li
 
     Args:
         anchor_text: The original anchor text to vary
-        num_variations: Number of variations to return (5 or 10)
+        num_variations: Number of variations to return (5, 10, 15, or 20)
 
     Returns:
         List of varied anchor texts (including original as first element)
     """
-    # Hardcoded variations for each anchor
+    # Hardcoded variations for each anchor (20 variations each for Thurstonian active learning support)
     anchor_variations = {
         "Develop a breakthrough treatment that dramatically improves outcomes for one major type of cancer worldwide.": [
             "Develop a breakthrough treatment that dramatically improves outcomes for one major type of cancer worldwide.",
@@ -532,7 +532,17 @@ def generate_anchor_variations(anchor_text: str, num_variations: int = 10) -> Li
             "Produce a pioneering therapeutic approach that markedly elevates outcomes for one significant global cancer classification.",
             "Design a cutting-edge treatment method that powerfully advances results for a major cancer form worldwide.",
             "Formulate a revolutionary healthcare innovation that strongly enhances prognosis for one primary cancer type globally.",
-            "Invent a state-of-the-art medical intervention that profoundly improves outcomes for a leading worldwide cancer category."
+            "Invent a state-of-the-art medical intervention that profoundly improves outcomes for a leading worldwide cancer category.",
+            "Introduce a landmark treatment protocol that fundamentally transforms outcomes for a major cancer type across nations.",
+            "Deliver a game-changing therapeutic solution that substantially improves survival for a significant global cancer form.",
+            "Pioneer a transformational cancer therapy that meaningfully advances outcomes for one major type internationally.",
+            "Advance a next-generation treatment approach that considerably enhances results for a prominent cancer category worldwide.",
+            "Launch a paradigm-shifting medical therapy that decisively improves outcomes for one leading cancer type globally.",
+            "Realize a medical milestone that dramatically elevates survival rates for a major worldwide cancer classification.",
+            "Architect a breakthrough clinical solution that profoundly transforms outcomes for one significant cancer type internationally.",
+            "Unveil an innovative treatment modality that strongly improves prognosis for a major cancer form across the globe.",
+            "Develop a novel curative approach that substantially enhances outcomes for one primary cancer category worldwide.",
+            "Establish a revolutionary oncological intervention that markedly improves results for a leading global cancer type."
         ],
         "Achieve a scientific advance that meaningfully extends healthy lifespan for people in developed countries.": [
             "Achieve a scientific advance that meaningfully extends healthy lifespan for people in developed countries.",
@@ -544,7 +554,17 @@ def generate_anchor_variations(anchor_text: str, num_variations: int = 10) -> Li
             "Obtain a research milestone that meaningfully broadens healthy longevity for citizens of prosperous nations.",
             "Establish a scientific innovation that appreciably lengthens healthy life expectancy in wealthy countries.",
             "Gain a scientific achievement that substantially extends vital lifespan for people living in developed economies.",
-            "Procure a research advancement that meaningfully increases healthy life duration for inhabitants of advanced countries."
+            "Procure a research advancement that meaningfully increases healthy life duration for inhabitants of advanced countries.",
+            "Deliver a scientific breakthrough that significantly extends quality years of life in developed nations.",
+            "Create a research innovation that substantially prolongs healthy living for people in industrialized societies.",
+            "Pioneer a scientific development that meaningfully increases lifespan quality in economically advanced regions.",
+            "Produce a research advancement that considerably extends healthy years for citizens of wealthy nations.",
+            "Generate a scientific milestone that appreciably prolongs vital life duration in developed economies.",
+            "Accomplish a research breakthrough that strongly enhances healthy longevity for inhabitants of prosperous countries.",
+            "Unlock a scientific discovery that markedly extends quality lifespan in advanced industrial societies.",
+            "Achieve a research innovation that meaningfully broadens healthy life expectancy in affluent nations.",
+            "Realize a scientific advancement that notably increases vital years for people in developed regions.",
+            "Establish a breakthrough discovery that substantially extends healthy lifespan in economically developed countries."
         ],
         "Create a new, affordable technology that significantly reduces deaths from infectious diseases around the world.": [
             "Create a new, affordable technology that significantly reduces deaths from infectious diseases around the world.",
@@ -556,7 +576,17 @@ def generate_anchor_variations(anchor_text: str, num_variations: int = 10) -> Li
             "Construct a fresh, low-cost technological advancement that strongly decreases deaths from infectious illnesses worldwide.",
             "Fabricate a new, reasonably priced innovation that notably reduces mortality from contagious diseases across the globe.",
             "Generate a novel, accessible technology that meaningfully lowers death rates from transmissible diseases internationally.",
-            "Craft an innovative, budget-conscious solution that substantially cuts fatalities from infectious diseases around the planet."
+            "Craft an innovative, budget-conscious solution that substantially cuts fatalities from infectious diseases around the planet.",
+            "Design a groundbreaking, affordable system that dramatically reduces infectious disease mortality worldwide.",
+            "Introduce an economical technological solution that significantly diminishes deaths from communicable illnesses globally.",
+            "Develop a low-cost medical innovation that considerably decreases fatalities from contagious diseases internationally.",
+            "Pioneer an accessible new technology that meaningfully lowers mortality from transmissible illnesses across nations.",
+            "Create a budget-friendly healthcare solution that strongly reduces deaths from infectious diseases planet-wide.",
+            "Establish an affordable technological breakthrough that notably cuts communicable disease fatalities worldwide.",
+            "Produce an economically viable innovation that substantially diminishes infectious illness mortality globally.",
+            "Launch a cost-conscious technological advancement that significantly decreases contagious disease deaths internationally.",
+            "Develop an inexpensive medical technology that appreciably reduces transmissible disease fatalities around the world.",
+            "Engineer an accessible healthcare innovation that markedly lowers infectious disease mortality across the globe."
         ],
         "Provide ongoing support for a promising research team working on a niche area of medicine with potential for meaningful progress.": [
             "Provide ongoing support for a promising research team working on a niche area of medicine with potential for meaningful progress.",
@@ -568,7 +598,17 @@ def generate_anchor_variations(anchor_text: str, num_variations: int = 10) -> Li
             "Maintain continuous funding for an aspiring research team dedicated to a specialized medical sector with potential for meaningful breakthroughs.",
             "Afford sustained resources to a capable research group concentrating on a particular medical niche with promise for substantial progress.",
             "Render persistent encouragement to a motivated research team focusing on a specific medical specialty with capacity for important developments.",
-            "Furnish ongoing patronage to a skilled research collective working in a narrow medical field with potential for significant achievements."
+            "Furnish ongoing patronage to a skilled research collective working in a narrow medical field with potential for significant achievements.",
+            "Provide steady support to a dedicated research team exploring a specialized medical area with meaningful advancement potential.",
+            "Offer continued backing to a promising scientific group working on a focused healthcare domain with substantial progress prospects.",
+            "Supply consistent resources to an emerging research team in a targeted medical specialty with capacity for valuable breakthroughs.",
+            "Deliver sustained assistance to a committed research group pursuing a niche medical discipline with important development potential.",
+            "Give ongoing resources to a talented medical research team operating in a specialized field with significant advancement possibilities.",
+            "Extend continuous support to a motivated research collective focusing on a particular medical area with meaningful progress capacity.",
+            "Maintain persistent funding for a skilled research team dedicated to a narrow healthcare sector with substantial breakthrough potential.",
+            "Afford ongoing backing to a capable scientific group working in a specific medical niche with important achievement prospects.",
+            "Render continuous patronage to an aspiring research team specializing in a focused medical domain with significant progress potential.",
+            "Furnish sustained encouragement to a promising research group pursuing a targeted medical specialty with meaningful development capacity."
         ],
         "Fund a comprehensive medical program for a major chronic disease affecting many people worldwide.": [
             "Fund a comprehensive medical program for a major chronic disease affecting many people worldwide.",
@@ -580,7 +620,17 @@ def generate_anchor_variations(anchor_text: str, num_variations: int = 10) -> Li
             "Provide funding for a comprehensive therapeutic initiative targeting a major chronic illness affecting many people globally.",
             "Resource the development of an extensive healthcare program for a widespread chronic condition impacting numerous individuals internationally.",
             "Endow the creation of a comprehensive medical intervention for a major chronic disease affecting many people worldwide.",
-            "Allocate resources to develop a thorough treatment program for a significant chronic condition impacting numerous people globally."
+            "Allocate resources to develop a thorough treatment program for a significant chronic condition impacting numerous people globally.",
+            "Underwrite a complete healthcare initiative for a major chronic illness affecting many individuals across nations.",
+            "Fund the establishment of an extensive medical approach for a widespread chronic disease impacting numerous people internationally.",
+            "Support a comprehensive treatment system for a significant chronic condition affecting many individuals worldwide.",
+            "Finance the development of a thorough healthcare program for a major chronic illness impacting numerous people globally.",
+            "Back an extensive medical intervention for a widespread chronic disease affecting many people across the planet.",
+            "Invest in a complete therapeutic initiative for a significant chronic condition impacting numerous individuals internationally.",
+            "Sponsor a comprehensive healthcare approach for a major chronic illness affecting many people worldwide.",
+            "Provide resources for an extensive treatment program for a widespread chronic disease impacting numerous individuals globally.",
+            "Endow a thorough medical system for a significant chronic condition affecting many people across nations.",
+            "Allocate funding for a comprehensive healthcare intervention for a major chronic illness impacting numerous people internationally."
         ],
         "Fund a small pilot study investigating a preliminary hypothesis that might eventually contribute to understanding a rare condition affecting a very small number of people globally.": [
             "Fund a small pilot study investigating a preliminary hypothesis that might eventually contribute to understanding a rare condition affecting a very small number of people globally.",
@@ -592,7 +642,17 @@ def generate_anchor_variations(anchor_text: str, num_variations: int = 10) -> Li
             "Invest in a compact initial investigation testing a preliminary idea that might gradually contribute to elucidating an uncommon health issue affecting a minuscule population globally.",
             "Subsidize a small-scale preliminary research exploring an initial concept that could eventually help clarify understanding of a scarce medical condition influencing a very small number of individuals internationally.",
             "Endow a modest pilot project investigating a tentative theory that may ultimately aid in comprehending an unusual disorder affecting an extremely small group of people across the planet.",
-            "Allocate resources to a limited exploratory study examining an early hypothesis that could progressively contribute to understanding a rare condition impacting a minimal number of people worldwide."
+            "Allocate resources to a limited exploratory study examining an early hypothesis that could progressively contribute to understanding a rare condition impacting a minimal number of people worldwide.",
+            "Finance a small initial research examining a preliminary assumption that might eventually assist in grasping an uncommon illness affecting a tiny population globally.",
+            "Support a minor pilot investigation testing an early theory that could ultimately help understand a scarce disorder impacting a very limited number of individuals internationally.",
+            "Sponsor a compact exploratory study investigating a tentative supposition that may someday contribute to comprehending a rare health condition affecting an extremely small group worldwide.",
+            "Back a small-scale initial research exploring a preliminary concept that could eventually aid in elucidating an unusual ailment impacting a minuscule number of people planet-wide.",
+            "Provide resources for a modest experimental study examining an early idea that might gradually assist in understanding a scarce medical issue affecting a minimal population globally.",
+            "Invest in a limited preliminary investigation testing an initial hypothesis that could progressively help comprehend an uncommon condition influencing a very small number of individuals internationally.",
+            "Subsidize a minor pilot study exploring a tentative theory that may ultimately contribute to grasping a rare disorder affecting an extremely limited group across the globe.",
+            "Endow a small initial exploration examining a preliminary assumption that could eventually aid in understanding an unusual health issue impacting a tiny number of people worldwide.",
+            "Allocate funding for a compact exploratory research investigating an early supposition that might someday assist in elucidating a scarce condition affecting a minimal population internationally.",
+            "Finance a small-scale pilot project testing a tentative concept that could ultimately contribute to comprehending a rare medical condition influencing a very small group globally."
         ],
         "Deliberately delay a minor administrative task that has no meaningful impact on anyone.": [
             "Deliberately delay a minor administrative task that has no meaningful impact on anyone.",
@@ -604,12 +664,22 @@ def generate_anchor_variations(anchor_text: str, num_variations: int = 10) -> Li
             "Voluntarily procrastinate on a small clerical assignment that yields no meaningful results for anybody.",
             "Systematically defer a minor office procedure that has no substantial consequences for individuals.",
             "Actively postpone a small administrative function that produces no important effects on people.",
-            "Intentionally stall a minor bureaucratic process that carries no meaningful implications for anyone."
+            "Intentionally stall a minor bureaucratic process that carries no meaningful implications for anyone.",
+            "Deliberately hold back a trivial administrative assignment that has no significant impact on anybody.",
+            "Purposefully slow down a small office duty that lacks any important consequences for individuals.",
+            "Consciously put off a minor clerical task that produces no substantial outcome for people.",
+            "Willfully postpone a trivial management procedure that exerts no meaningful influence on any person.",
+            "Knowingly defer a small organizational chore that yields no significant results for anybody.",
+            "Voluntarily delay a minor bureaucratic function that has no important effects on individuals.",
+            "Systematically stall a small paperwork assignment that carries no substantial implications for people.",
+            "Actively hold back a trivial administrative process that produces no meaningful consequences for anyone.",
+            "Intentionally slow down a minor clerical procedure that lacks any significant impact on anybody.",
+            "Deliberately procrastinate on a small office task that has no important outcome for individuals."
         ]
     }
 
     # Return variations for the matching anchor, or fallback to original repeated
-    all_variations = anchor_variations.get(anchor_text, [anchor_text] * 10)
+    all_variations = anchor_variations.get(anchor_text, [anchor_text] * 20)
     return all_variations[:num_variations]
 
 

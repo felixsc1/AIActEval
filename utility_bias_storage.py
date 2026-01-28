@@ -3,6 +3,14 @@ Utility Bias Test Run Storage
 
 Handles persistent storage of utility bias test runs as JSON files.
 Provides functions for saving, listing, and loading test results.
+
+Supports two testing methods:
+- Grid testing (method="grid"): Exhaustive grid search over ethnicities × N values
+- Thurstonian active learning (method="thurstonian"): Intelligent sampling with utility model
+
+Schema version history:
+- Version 1: Original grid-based testing
+- Version 2: Added Thurstonian model support with utilities, metrics, and query history
 """
 
 import json
@@ -11,7 +19,12 @@ import uuid
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import pandas as pd
+import numpy as np
 from datetime import datetime
+
+
+# Current schema version
+CURRENT_SCHEMA_VERSION = 2
 
 
 def get_utility_bias_runs_dir() -> Path:
@@ -56,6 +69,105 @@ def deserialize_dataframe(obj: Dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(obj['data'], columns=obj['columns'])
 
 
+def serialize_numpy(obj: Any) -> Any:
+    """
+    Convert numpy types to Python native types for JSON serialization.
+
+    Args:
+        obj: Object that may contain numpy types
+
+    Returns:
+        JSON-serializable version of the object
+    """
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, dict):
+        return {k: serialize_numpy(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_numpy(v) for v in obj]
+    return obj
+
+
+def serialize_thurstonian_model(thurstonian_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Serialize Thurstonian model data for JSON storage.
+
+    Args:
+        thurstonian_data: Dict containing utilities, metrics, query_history, etc.
+
+    Returns:
+        JSON-serializable dict
+    """
+    serialized = {}
+
+    # Serialize utilities (option_id -> {mean, variance})
+    if 'utilities' in thurstonian_data and thurstonian_data['utilities']:
+        serialized['utilities'] = {
+            option_id: {
+                'mean': float(util['mean']),
+                'variance': float(util['variance'])
+            }
+            for option_id, util in thurstonian_data['utilities'].items()
+        }
+
+    # Serialize anchor variance
+    if 'anchor_variance' in thurstonian_data:
+        serialized['anchor_variance'] = float(thurstonian_data['anchor_variance'])
+
+    # Serialize metrics
+    if 'metrics' in thurstonian_data:
+        serialized['metrics'] = serialize_numpy(thurstonian_data['metrics'])
+
+    # Serialize query history (list of query records)
+    if 'query_history' in thurstonian_data:
+        serialized['query_history'] = [
+            serialize_numpy(record) for record in thurstonian_data['query_history']
+        ]
+
+    # Copy other fields
+    for key in ['n_observations', 'n_options_queried', 'n_iterations', 'converged']:
+        if key in thurstonian_data:
+            serialized[key] = thurstonian_data[key]
+
+    return serialized
+
+
+def deserialize_thurstonian_model(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deserialize Thurstonian model data from JSON.
+
+    Args:
+        data: Dict from JSON containing Thurstonian model data
+
+    Returns:
+        Reconstructed Thurstonian model data
+    """
+    # The data is already in the correct format, just ensure types are correct
+    result = {}
+
+    if 'utilities' in data:
+        result['utilities'] = data['utilities']
+
+    if 'anchor_variance' in data:
+        result['anchor_variance'] = float(data['anchor_variance'])
+
+    if 'metrics' in data:
+        result['metrics'] = data['metrics']
+
+    if 'query_history' in data:
+        result['query_history'] = data['query_history']
+
+    for key in ['n_observations', 'n_options_queried', 'n_iterations', 'converged']:
+        if key in data:
+            result[key] = data[key]
+
+    return result
+
+
 def generate_run_id(model_name: str) -> str:
     """
     Generate a unique run ID based on timestamp and model name.
@@ -80,7 +192,9 @@ def save_utility_bias_run(payload: Dict[str, Any]) -> Path:
     Save a utility bias test run to a JSON file.
 
     Args:
-        payload: Complete run data including config, results, and metadata
+        payload: Complete run data including config, results, and metadata.
+                 For Thurstonian runs, should include 'method': 'thurstonian'
+                 and 'thurstonian_model' in results.
 
     Returns:
         Path to the saved JSON file
@@ -97,7 +211,17 @@ def save_utility_bias_run(payload: Dict[str, Any]) -> Path:
         payload['created_at'] = datetime.now().isoformat()
 
     # Set schema version
-    payload['version'] = 1
+    payload['version'] = CURRENT_SCHEMA_VERSION
+
+    # Set method type if not specified (default to 'grid' for backwards compatibility)
+    if 'method' not in payload:
+        payload['method'] = 'grid'
+
+    # Serialize Thurstonian model data if present
+    if 'results' in payload and 'thurstonian_model' in payload['results']:
+        payload['results']['thurstonian_model'] = serialize_thurstonian_model(
+            payload['results']['thurstonian_model']
+        )
 
     # Ensure run_id is a valid filename
     run_id = payload['run_id']
@@ -130,6 +254,20 @@ def list_utility_bias_runs() -> List[Dict[str, Any]]:
                 # Read only the metadata fields we need for listing
                 data = json.load(f)
 
+                # Determine method type (default to 'grid' for v1 files)
+                method = data.get('method', 'grid')
+
+                # Get Thurstonian-specific info if available
+                thurstonian_info = {}
+                if method == 'thurstonian' and 'results' in data:
+                    thurstonian_model = data['results'].get('thurstonian_model', {})
+                    thurstonian_info = {
+                        'n_iterations': thurstonian_model.get('n_iterations', 0),
+                        'n_observations': thurstonian_model.get('n_observations', 0),
+                        'model_accuracy': thurstonian_model.get('metrics', {}).get('accuracy', None),
+                        'model_log_loss': thurstonian_model.get('metrics', {}).get('log_loss', None)
+                    }
+
                 run_info = {
                     'run_id': data.get('run_id', json_file.stem),
                     'filepath': str(json_file),
@@ -141,7 +279,10 @@ def list_utility_bias_runs() -> List[Dict[str, Any]]:
                     'num_anchor_variations': data.get('test_config', {}).get('num_anchor_variations', 0),
                     'status': data.get('run_metadata', {}).get('status', 'Unknown'),
                     'total_queries': data.get('run_metadata', {}).get('total_queries', 0),
-                    'notes': data.get('notes', '')
+                    'notes': data.get('notes', ''),
+                    'method': method,
+                    'version': data.get('version', 1),
+                    **thurstonian_info
                 }
 
                 runs.append(run_info)
@@ -164,7 +305,7 @@ def load_utility_bias_run(run_id_or_path: str) -> Dict[str, Any]:
         run_id_or_path: Either a run_id (filename without .json) or full path to JSON file
 
     Returns:
-        Complete run data with reconstructed DataFrames
+        Complete run data with reconstructed DataFrames and Thurstonian model data
 
     Raises:
         FileNotFoundError: If the run file doesn't exist
@@ -189,10 +330,14 @@ def load_utility_bias_run(run_id_or_path: str) -> Dict[str, Any]:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-        # Validate schema version
-        version = data.get('version', 0)
-        if version != 1:
+        # Validate schema version (support both v1 and v2)
+        version = data.get('version', 1)
+        if version not in [1, 2]:
             raise ValueError(f"Unsupported schema version: {version}")
+
+        # Set default method for v1 files
+        if 'method' not in data:
+            data['method'] = 'grid'
 
         # Reconstruct DataFrames from serialized format
         if 'results' in data:
@@ -209,6 +354,12 @@ def load_utility_bias_run(run_id_or_path: str) -> Dict[str, Any]:
             # Reconstruct summary_table
             if 'summary_table' in results and results['summary_table']:
                 data['results']['summary_table'] = deserialize_dataframe(results['summary_table'])
+
+            # Deserialize Thurstonian model data if present
+            if 'thurstonian_model' in results and results['thurstonian_model']:
+                data['results']['thurstonian_model'] = deserialize_thurstonian_model(
+                    results['thurstonian_model']
+                )
 
         return data
 
