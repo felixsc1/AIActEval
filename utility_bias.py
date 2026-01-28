@@ -39,10 +39,11 @@ GROQ_API_BASE_URL = "https://api.groq.com/openai/v1"
 GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-# Groq rate limits (free tier)
-GROQ_REQUESTS_PER_MINUTE = 30
-GROQ_TOKENS_PER_MINUTE = 8000
-GROQ_REQUESTS_PER_HOUR = 14400  # Higher limit for longer periods
+# Groq rate limits (developer tier, for free tier divide everything by 10)
+GROQ_REQUESTS_PER_MINUTE = 300
+GROQ_TOKENS_PER_MINUTE = 80000
+GROQ_REQUESTS_PER_HOUR = 144000  # Higher limit for longer periods
+# NOTE: also modify self.min_request_interval  somewhere further below.
 
 
 # Configuration classes for better type safety and future extensibility
@@ -107,7 +108,7 @@ class RateLimiter:
         self.token_usage = deque()
         
         # Minimum wait between requests (2.5 seconds = max 24 requests/min, well under 30)
-        self.min_request_interval = 2.5
+        self.min_request_interval = 0.5
         self.last_request_time = 0
 
     def wait_if_needed(self, estimated_tokens: int = 100) -> float:
@@ -1887,12 +1888,20 @@ def create_preference_plot(stats: Dict[str, Any]) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=(12, 8))
 
+    # Detect whether this run used aggregated multi-variation data.
+    # Aggregated runs always contain a pref_percentage column computed in
+    # aggregate_variation_results, whereas single-variation (binary) runs do not.
+    is_aggregated = 'pref_percentage' in preference_curves.columns
+
     # Plot each ethnicity
     ethnicities = preference_curves['ethnicity'].unique()
     colors = plt.cm.tab10(np.linspace(0, 1, len(ethnicities)))
 
-    # Check if we have percentage-based data (from aggregated variations)
-    has_percentage_data = not preference_curves['pref_percent'].isin([0.0, 100.0, np.nan]).all()
+    # Check if we have percentage-based data (from aggregated variations).
+    # If the data came from aggregation, always treat it as percentage-based,
+    # even if all points are 0/100 (the internal logic below already handles
+    # "all low" / "all high" as an edge case without forcing binary visuals).
+    has_percentage_data = is_aggregated or not preference_curves['pref_percent'].isin([0.0, 100.0, np.nan]).all()
 
     for i, ethnicity in enumerate(ethnicities):
         eth_data = preference_curves[preference_curves['ethnicity'] == ethnicity].dropna().sort_values('log_n')
@@ -1971,15 +1980,18 @@ def create_preference_plot(stats: Dict[str, Any]) -> plt.Figure:
                          color=colors[i], edgecolors='white', linewidths=1.5,
                          zorder=3, alpha=0.9)
 
-                # Highlight switch points
-                switch_mask = (binary_pref.astype(int).diff() == 1)
+                # Highlight switch points: look for 0→1 transitions in the
+                # binary preference array using numpy instead of pandas Series.diff
+                binary_int = binary_pref.astype(int)
+                diffs = np.diff(binary_int, prepend=binary_int[0])
+                switch_mask = diffs == 1
                 if switch_mask.any():
-                    switch_points = eth_data[switch_mask]
+                    switch_x = x_data[switch_mask]
                     switch_jittered = 1.0 + jitter_offset
-                    ax.scatter(switch_points['log_n'],
-                             [switch_jittered] * len(switch_points),
-                             s=200, marker='*', color=colors[i], edgecolors='black',
-                             linewidths=2, zorder=5)
+                    ax.scatter(switch_x,
+                               [switch_jittered] * len(switch_x),
+                               s=200, marker='*', color=colors[i],
+                               edgecolors='black', linewidths=2, zorder=5)
 
     # Set axis labels and ranges based on data type
     ax.set_xlabel('log₁₀(N) - Number of People to Save')

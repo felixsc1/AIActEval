@@ -415,7 +415,7 @@ def render_single_query_test(selected_model_key, model_provider, config, num_ctx
                 # Unload model after single query test to free VRAM (Ollama only)
                 if model_provider == "ollama":
                     with st.spinner("Cleaning up model from memory..."):
-                        if unload_model(selected_model):
+                        if unload_model(selected_model_key):
                             st.info("✅ Model unloaded from VRAM to free memory.")
                         else:
                             st.info("ℹ️ Model cleanup attempted (may already be unloaded).")
@@ -426,7 +426,7 @@ def render_single_query_test(selected_model_key, model_provider, config, num_ctx
                 st.code(traceback.format_exc())
                 # Try to unload model even on error to prevent memory issues (Ollama only)
                 if model_provider == "ollama":
-                    unload_model(selected_model)
+                    unload_model(selected_model_key)
 
 
 def render_full_test_execution(selected_model_key, model_provider, config, num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled):
@@ -480,7 +480,7 @@ def render_full_test_execution(selected_model_key, model_provider, config, num_c
                     'results_df': results_df,
                     'stats': stats,
                     'config': {
-                        'model': selected_model,
+                        'model': selected_model_key,
                         'ethnicities': config['selected_ethnicities'],
                         'n_values': config['selected_n_values'],
                         'anchor': config['anchor_text'],
@@ -492,7 +492,7 @@ def render_full_test_execution(selected_model_key, model_provider, config, num_c
                 # Prepare run payload for persistent storage
                 run_payload = {
                     'model_info': {
-                        'ollama_model': selected_model,
+                        'ollama_model': selected_model_key,
                         'base_url': "http://localhost:11434",
                         'used_gpu': num_gpu is not None,
                         'num_ctx': num_ctx,
@@ -541,7 +541,7 @@ def render_full_test_execution(selected_model_key, model_provider, config, num_c
 
                 # Unload model after full test to free VRAM (Ollama only)
                 if model_provider == "ollama":
-                    unload_model(selected_model)
+                    unload_model(selected_model_key)
 
                 # Check if test succeeded or failed
                 status_value = stats.get('status')
@@ -558,7 +558,7 @@ def render_full_test_execution(selected_model_key, model_provider, config, num_c
                 st.error(f"❌ Test failed: {e}")
                 # Try to unload model even on error to prevent memory issues (Ollama only)
                 if model_provider == "ollama":
-                    unload_model(selected_model)
+                    unload_model(selected_model_key)
                 return
 
 
