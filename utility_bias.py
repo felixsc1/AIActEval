@@ -23,11 +23,26 @@ import ollama
 import streamlit as st
 import re
 import time
+import requests
+import os
+from threading import Lock
+from collections import deque
+import threading
 
 # Constants
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_NUM_CTX = 2048
 DEFAULT_TEMPERATURE = 0.0
+
+# Groq API constants
+GROQ_API_BASE_URL = "https://api.groq.com/openai/v1"
+GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
+GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Groq rate limits (free tier)
+GROQ_REQUESTS_PER_MINUTE = 30
+GROQ_TOKENS_PER_MINUTE = 8000
+GROQ_REQUESTS_PER_HOUR = 14400  # Higher limit for longer periods
 
 
 # Configuration classes for better type safety and future extensibility
@@ -76,6 +91,311 @@ class UtilityBiasConfig:
     def from_dict(cls, data: Dict[str, Any]) -> 'UtilityBiasConfig':
         """Create from dictionary."""
         return cls(**data)
+
+
+class RateLimiter:
+    """Thread-safe rate limiter for API calls with conservative limits for Groq free tier."""
+
+    def __init__(self, requests_per_minute: int, tokens_per_minute: int):
+        self.requests_per_minute = requests_per_minute
+        self.tokens_per_minute = tokens_per_minute
+        self.lock = Lock()
+
+        # Track requests in the last minute
+        self.request_times = deque()
+        # Track tokens in the last minute (timestamp, tokens)
+        self.token_usage = deque()
+        
+        # Minimum wait between requests (2.5 seconds = max 24 requests/min, well under 30)
+        self.min_request_interval = 2.5
+        self.last_request_time = 0
+
+    def wait_if_needed(self, estimated_tokens: int = 100) -> float:
+        """
+        Wait if necessary to respect rate limits.
+
+        Args:
+            estimated_tokens: Estimated number of tokens for this request
+
+        Returns:
+            Time waited in seconds
+        """
+        with self.lock:
+            current_time = time.time()
+            one_minute_ago = current_time - 60
+
+            # Remove old entries
+            while self.request_times and self.request_times[0] < one_minute_ago:
+                self.request_times.popleft()
+
+            while self.token_usage and self.token_usage[0][0] < one_minute_ago:
+                self.token_usage.popleft()
+
+            # Calculate current usage
+            current_requests = len(self.request_times)
+            current_tokens = sum(tokens for _, tokens in self.token_usage)
+
+            # Check if we need to wait
+            wait_time = 0.0
+
+            # Enforce minimum interval between requests
+            time_since_last = current_time - self.last_request_time
+            if time_since_last < self.min_request_interval:
+                wait_time = max(wait_time, self.min_request_interval - time_since_last)
+
+            # Check request rate limit (with 20% safety margin)
+            safe_request_limit = int(self.requests_per_minute * 0.8)
+            if current_requests >= safe_request_limit:
+                # Wait until oldest request expires plus a small buffer
+                wait_time = max(wait_time, self.request_times[0] + 60 - current_time + 1.0)
+
+            # Check token rate limit (with 20% safety margin)
+            safe_token_limit = int(self.tokens_per_minute * 0.8)
+            if current_tokens + estimated_tokens > safe_token_limit:
+                # Calculate how long to wait for enough tokens to free up
+                tokens_needed = current_tokens + estimated_tokens - safe_token_limit
+                # Tokens free up as old requests expire (oldest first)
+                wait_time = max(wait_time, tokens_needed / (self.tokens_per_minute / 60) + 1.0)
+
+            if wait_time > 0:
+                print(f"[Rate Limiter] Waiting {wait_time:.1f}s (requests: {current_requests}/{safe_request_limit}, tokens: {current_tokens}/{safe_token_limit})")
+                time.sleep(wait_time)
+
+            # Record this request
+            self.last_request_time = time.time()
+            self.request_times.append(self.last_request_time)
+            self.token_usage.append((self.last_request_time, estimated_tokens))
+
+            return wait_time
+
+    def record_actual_tokens(self, actual_tokens: int):
+        """
+        Update the last recorded token usage with actual tokens from API response.
+        Call this after getting the API response to improve future estimates.
+        """
+        with self.lock:
+            if self.token_usage:
+                # Update the most recent entry with actual token count
+                last_time, _ = self.token_usage.pop()
+                self.token_usage.append((last_time, actual_tokens))
+
+
+# Global rate limiter for Groq API
+_groq_rate_limiter = RateLimiter(GROQ_REQUESTS_PER_MINUTE, GROQ_TOKENS_PER_MINUTE)
+
+
+def get_groq_api_key() -> str:
+    """Get Groq API key from environment."""
+    # Try to load from dotenv in case it wasn't loaded yet
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise ValueError("GROQ_API_KEY environment variable not set. Please add it to your .env file.")
+    
+    # Basic validation - Groq keys start with 'gsk_'
+    if not api_key.startswith('gsk_'):
+        print(f"[Groq Warning] API key doesn't start with 'gsk_' - might be invalid")
+    
+    return api_key
+
+
+def get_groq_models() -> List[Dict[str, Any]]:
+    """
+    Fetch available Groq models from the API.
+
+    Returns:
+        List of model dictionaries with 'id', 'object', 'created', 'owned_by' fields
+    """
+    try:
+        api_key = get_groq_api_key()
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.get(GROQ_MODELS_URL, headers=headers)
+        response.raise_for_status()
+
+        data = response.json()
+        return data.get('data', [])
+
+    except Exception as e:
+        print(f"Failed to fetch Groq models: {e}")
+        return []
+
+
+def get_groq_model_options() -> Dict[str, str]:
+    """
+    Get Groq models formatted for UI selection.
+
+    Returns:
+        Dict mapping model IDs to display names
+    """
+    models = get_groq_models()
+    options = {}
+
+    for model in models:
+        model_id = model.get('id', '')
+        if model_id:
+            # Format display name (e.g., "llama3-8b-8192" -> "Llama 3 8B")
+            display_name = model_id.replace('-', ' ').replace('_', ' ').title()
+            options[model_id] = f"Groq: {display_name}"
+
+    return options
+
+
+def call_groq_api(model: str, messages: List[Dict[str, str]], temperature: float = 0.0, max_tokens: int = 1024, max_retries: int = 3) -> Dict[str, Any]:
+    """
+    Call Groq API with rate limiting and automatic retry on rate limit errors.
+
+    Args:
+        model: Groq model ID
+        messages: List of message dicts with 'role' and 'content'
+        temperature: Response randomness
+        max_tokens: Maximum tokens to generate
+        max_retries: Maximum number of retries on rate limit errors
+
+    Returns:
+        API response dict
+    """
+    api_key = get_groq_api_key()
+
+    # Conservative token estimate: ~4 chars per token for input + expected output tokens
+    # Our prompts are typically 300-500 chars, responses are short (1-50 tokens)
+    # But we need to account for total tokens (input + output)
+    estimated_chars = sum(len(msg.get('content', '')) for msg in messages)
+    estimated_input_tokens = max(100, estimated_chars // 3)  # More conservative: 3 chars per token
+    estimated_output_tokens = 100  # Conservative estimate for response
+    estimated_total_tokens = estimated_input_tokens + estimated_output_tokens
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens
+    }
+
+    for attempt in range(max_retries):
+        # Wait for rate limits before each attempt
+        wait_time = _groq_rate_limiter.wait_if_needed(estimated_total_tokens)
+        if wait_time > 0.1:
+            print(f"[Rate Limiter] Pre-request wait: {wait_time:.2f}s")
+
+        print(f"[Groq Debug] Attempt {attempt + 1}/{max_retries} - Calling model: {model}")
+
+        response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload)
+
+        # Handle rate limit errors with retry
+        if response.status_code == 429:
+            error_data = response.json().get('error', {})
+            error_message = error_data.get('message', '')
+            print(f"[Groq Debug] Rate limit hit: {error_message}")
+            
+            # Extract wait time from error message if available
+            # Message format: "Please try again in 457.5ms"
+            import re
+            wait_match = re.search(r'try again in ([\d.]+)(ms|s)', error_message)
+            if wait_match:
+                wait_value = float(wait_match.group(1))
+                wait_unit = wait_match.group(2)
+                if wait_unit == 'ms':
+                    retry_wait = wait_value / 1000.0
+                else:
+                    retry_wait = wait_value
+                # Add buffer to the suggested wait time
+                retry_wait = max(retry_wait + 1.0, 3.0)
+            else:
+                # Default wait: exponential backoff
+                retry_wait = (2 ** attempt) * 3.0
+            
+            print(f"[Groq Debug] Waiting {retry_wait:.1f}s before retry...")
+            time.sleep(retry_wait)
+            continue
+
+        # Check for other HTTP errors
+        if response.status_code != 200:
+            print(f"[Groq Debug] HTTP Error: {response.status_code}")
+            print(f"[Groq Debug] Response body: {response.text}")
+            response.raise_for_status()
+
+        result = response.json()
+        
+        # Record actual token usage from response
+        usage = result.get('usage', {})
+        actual_total_tokens = usage.get('total_tokens', estimated_total_tokens)
+        _groq_rate_limiter.record_actual_tokens(actual_total_tokens)
+        
+        print(f"[Groq Debug] Success - Tokens used: {actual_total_tokens} (prompt: {usage.get('prompt_tokens', '?')}, completion: {usage.get('completion_tokens', '?')})")
+
+        return result
+
+    # If we exhausted all retries
+    raise Exception(f"Groq API rate limit exceeded after {max_retries} retries. Please wait a minute and try again.")
+
+
+def is_groq_model(model_name: str) -> bool:
+    """Check if a model name refers to a Groq model."""
+    return model_name.startswith('groq/') or model_name in get_groq_model_options()
+
+
+def get_all_available_models() -> Dict[str, str]:
+    """
+    Get all available models from both Ollama and Groq providers.
+
+    Returns:
+        Dict mapping model identifiers to display names
+    """
+    all_models = {}
+
+    # Add Ollama models
+    try:
+        from evaluator import get_ollama_models
+        ollama_models = get_ollama_models()
+        for model in ollama_models:
+            if isinstance(model, dict):
+                name = model.get('name') or model.get('model')
+            else:
+                name = getattr(model, 'model', None) or getattr(model, 'name', None)
+
+            if name:
+                # Format display name for Ollama models
+                display_name = name.split(':')[0].replace('-', ' ').replace('_', ' ').title()
+                all_models[f"ollama/{name}"] = f"Ollama: {display_name}"
+    except Exception as e:
+        print(f"Warning: Could not fetch Ollama models: {e}")
+
+    # Add Groq models
+    groq_models = get_groq_model_options()
+    for model_id, display_name in groq_models.items():
+        all_models[f"groq/{model_id}"] = display_name
+
+    return all_models
+
+
+def get_model_provider_and_name(model_key: str) -> Tuple[str, str]:
+    """
+    Extract provider and actual model name from a model key.
+
+    Args:
+        model_key: Key like "ollama/llama3.2:3b" or "groq/llama3-8b-8192"
+
+    Returns:
+        Tuple of (provider, model_name)
+    """
+    if model_key.startswith('groq/'):
+        return 'groq', model_key[5:]  # Remove 'groq/' prefix
+    elif model_key.startswith('ollama/'):
+        return 'ollama', model_key[7:]  # Remove 'ollama/' prefix
+    else:
+        # Fallback: assume Ollama if no prefix
+        return 'ollama', model_key
 
 
 # ============================================================================
@@ -568,55 +888,63 @@ def run_utility_bias_test(
     num_ctx: int = 2048,
     num_gpu: Optional[int] = None,
     cleanup_interval: int = 0,
-    gpu_fallback: bool = False
+    gpu_fallback: bool = False,
+    model_provider: str = "ollama"  # "ollama" or "groq"
 ) -> pd.DataFrame:
     """
-    Run utility bias test by querying Ollama model and parsing responses.
+    Run utility bias test by querying model and parsing responses.
 
     Args:
-        model: Ollama model name
+        model: Model name (Ollama format or Groq model ID)
         queries_df: DataFrame from generate_utility_queries
-        base_url: Ollama server URL
+        base_url: Ollama server URL (ignored for Groq)
         progress_callback: Optional callback for progress updates
         system_prompt: System prompt to use for all queries (for jailbreaking restrictive models)
-        num_ctx: Context window size (default 2048, sufficient for our prompts)
-        num_gpu: Number of GPU layers (None=auto, 0=CPU only, higher=more GPU)
-        cleanup_interval: Unload/reload model every N queries to prevent memory leaks (0=disabled)
-        gpu_fallback: If True and GPU OOM error occurs, automatically retry with CPU (num_gpu=0)
+        num_ctx: Context window size (default 2048, sufficient for our prompts) - Ollama only
+        num_gpu: Number of GPU layers (None=auto, 0=CPU only, higher=more GPU) - Ollama only
+        cleanup_interval: Unload/reload model every N queries to prevent memory leaks (0=disabled) - Ollama only
+        gpu_fallback: If True and GPU OOM error occurs, automatically retry with CPU (num_gpu=0) - Ollama only
+        model_provider: "ollama" or "groq" - determines which API to use
 
     Returns:
         DataFrame with results: query, ethnicity, n_value, response, choice, is_refusal, log_n
     """
-    try:
-        client = ollama.Client(host=base_url)
-    except Exception as e:
-        raise Exception(f"Failed to connect to Ollama at {base_url}: {e}")
+    # Determine model provider and extract actual model name
+    if model_provider == "groq":
+        # Extract Groq model ID (remove 'groq/' prefix if present)
+        groq_model = model.replace('groq/', '') if model.startswith('groq/') else model
+        client = None  # We'll use requests for Groq
+    else:  # ollama
+        try:
+            client = ollama.Client(host=base_url)
+        except Exception as e:
+            raise Exception(f"Failed to connect to Ollama at {base_url}: {e}")
+
+        # Track if we've fallen back to CPU
+        using_cpu_fallback = False
+
+        # Build optimized options
+        ollama_options = get_ollama_options(
+            num_ctx=num_ctx,
+            num_gpu=num_gpu,
+            temperature=0  # Deterministic responses for consistent preference curves
+        )
+
+        # Build CPU fallback options (only used if gpu_fallback=True and OOM occurs)
+        cpu_options = get_ollama_options(
+            num_ctx=num_ctx,
+            num_gpu=0,  # Force CPU
+            temperature=0
+        )
 
     results = []
-    
-    # Track if we've fallen back to CPU
-    using_cpu_fallback = False
-    
-    # Build optimized options
-    ollama_options = get_ollama_options(
-        num_ctx=num_ctx,
-        num_gpu=num_gpu,
-        temperature=0  # Deterministic responses for consistent preference curves
-    )
-    
-    # Build CPU fallback options (only used if gpu_fallback=True and OOM occurs)
-    cpu_options = get_ollama_options(
-        num_ctx=num_ctx,
-        num_gpu=0,  # Force CPU
-        temperature=0
-    )
 
     for i, (_, row) in enumerate(queries_df.iterrows()):
         if progress_callback:
             progress_callback(i + 1, len(queries_df))
             
-        # Periodic cleanup to prevent memory leaks during long runs
-        if cleanup_interval > 0 and i > 0 and i % cleanup_interval == 0:
+        # Periodic cleanup to prevent memory leaks during long runs (Ollama only)
+        if model_provider == "ollama" and cleanup_interval > 0 and i > 0 and i % cleanup_interval == 0:
             unload_model(model, base_url)
             # Small delay to allow memory to be freed
             time.sleep(0.5)
@@ -627,48 +955,80 @@ def run_utility_bias_test(
             prompt_to_send = row['query']
             if not prompt_to_send or len(prompt_to_send.strip()) == 0:
                 raise ValueError(f"Empty prompt for ethnicity={row['ethnicity']}, n={row['n_value']}")
-            
-            # Use CPU options if we've already fallen back
-            current_options = cpu_options if using_cpu_fallback else ollama_options
-            
-            # Prepare generate call with optional system prompt
-            # Uses optimized options including smaller context window and optional GPU settings
-            generate_kwargs = {
-                "model": model,
-                "prompt": prompt_to_send,
-                "stream": False,
-                "options": current_options
-            }
 
-            if system_prompt.strip():
-                generate_kwargs["system"] = system_prompt
+            if model_provider == "groq":
+                # Use Groq API
+                messages = []
+                if system_prompt.strip():
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt_to_send})
 
-            try:
-                response_obj = client.generate(**generate_kwargs)
-            except Exception as gen_error:
-                # Check if this is a GPU OOM error and we can fall back
-                if gpu_fallback and not using_cpu_fallback and is_gpu_oom_error(gen_error):
-                    print(f"GPU out of memory detected, falling back to CPU mode...")
-                    using_cpu_fallback = True
-                    # Unload the model to free GPU memory before retrying
-                    unload_model(model, base_url)
-                    time.sleep(1)  # Give time for memory to be freed
-                    # Retry with CPU options
-                    generate_kwargs["options"] = cpu_options
+                response_obj = call_groq_api(
+                    model=groq_model,
+                    messages=messages,
+                    temperature=0.0,
+                    max_tokens=1024
+                )
+
+                # Extract response from Groq format (OpenAI-compatible)
+                # Structure: {"choices": [{"message": {"content": "..."}}]}
+                choices = response_obj.get('choices', [])
+                if not choices:
+                    raise ValueError(f"Groq API returned no choices. Full response: {response_obj}")
+                
+                first_choice = choices[0]
+                message = first_choice.get('message', {})
+                response = message.get('content', '')
+                
+                if not response:
+                    # Try alternative response structures
+                    response = first_choice.get('text', '')  # Some APIs use 'text' instead
+                    
+                if not response:
+                    raise ValueError(f"Could not extract content from Groq response. Choice structure: {first_choice}")
+
+            else:  # Ollama
+                # Use CPU options if we've already fallen back
+                current_options = cpu_options if using_cpu_fallback else ollama_options
+
+                # Prepare generate call with optional system prompt
+                # Uses optimized options including smaller context window and optional GPU settings
+                generate_kwargs = {
+                    "model": model,
+                    "prompt": prompt_to_send,
+                    "stream": False,
+                    "options": current_options
+                }
+
+                if system_prompt.strip():
+                    generate_kwargs["system"] = system_prompt
+
+                try:
                     response_obj = client.generate(**generate_kwargs)
+                except Exception as gen_error:
+                    # Check if this is a GPU OOM error and we can fall back
+                    if gpu_fallback and not using_cpu_fallback and is_gpu_oom_error(gen_error):
+                        print(f"GPU out of memory detected, falling back to CPU mode...")
+                        using_cpu_fallback = True
+                        # Unload the model to free GPU memory before retrying
+                        unload_model(model, base_url)
+                        time.sleep(1)  # Give time for memory to be freed
+                        # Retry with CPU options
+                        generate_kwargs["options"] = cpu_options
+                        response_obj = client.generate(**generate_kwargs)
+                    else:
+                        raise  # Re-raise if not OOM or fallback not enabled
+
+                # Extract response - handle different possible response formats
+                # Ollama can return a dict, or an object with a .response attribute
+                if isinstance(response_obj, dict):
+                    response = response_obj.get('response', '')
+                elif hasattr(response_obj, 'response'):
+                    # Ollama client returns an object with .response attribute
+                    response = response_obj.response
                 else:
-                    raise  # Re-raise if not OOM or fallback not enabled
-            
-            # Extract response - handle different possible response formats
-            # Ollama can return a dict, or an object with a .response attribute
-            if isinstance(response_obj, dict):
-                response = response_obj.get('response', '')
-            elif hasattr(response_obj, 'response'):
-                # Ollama client returns an object with .response attribute
-                response = response_obj.response
-            else:
-                # Last resort: convert to string (may not work well)
-                response = str(response_obj)
+                    # Last resort: convert to string (may not work well)
+                    response = str(response_obj)
             
             if not response or len(response.strip()) == 0:
                 raise ValueError("Empty response from model")
@@ -685,7 +1045,8 @@ def run_utility_bias_test(
                 'raw_choice': parse_result.get('raw_choice'),  # Store raw P/Q
                 'is_refusal': parse_result['is_refusal'],
                 'log_n': np.log10(row['n_value']) if row['n_value'] > 0 else 0,
-                'used_cpu_fallback': using_cpu_fallback  # Track if CPU fallback was used
+                'model_provider': model_provider,
+                'used_cpu_fallback': using_cpu_fallback if model_provider == "ollama" else False  # Track if CPU fallback was used
             }
 
             results.append(result)
@@ -700,7 +1061,8 @@ def run_utility_bias_test(
                 'choice': None,
                 'raw_choice': None,
                 'is_refusal': True,
-                'log_n': np.log10(row['n_value']) if row['n_value'] > 0 else 0
+                'log_n': np.log10(row['n_value']) if row['n_value'] > 0 else 0,
+                'model_provider': model_provider
             }
             results.append(result)
 
@@ -912,7 +1274,8 @@ def run_utility_bias_test_with_variations(
     num_ctx: int = 2048,
     num_gpu: Optional[int] = None,
     cleanup_interval: int = 0,
-    gpu_fallback: bool = False
+    gpu_fallback: bool = False,
+    model_provider: str = "ollama"
 ) -> Tuple[List[pd.DataFrame], List[bool], List[Dict[str, float]]]:
     """
     Run utility bias test with anchor variations to improve robustness against
@@ -928,10 +1291,11 @@ def run_utility_bias_test_with_variations(
         progress_callback: Optional callback for progress updates
         num_anchor_variations: Number of anchor variations to use (5 or 10)
         system_prompt: System prompt to use for all queries
-        num_ctx: Context window size (default 2048, sufficient for our prompts)
-        num_gpu: Number of GPU layers (None=auto, 0=CPU only, higher=more GPU)
-        cleanup_interval: Unload/reload model every N queries to prevent memory leaks (0=disabled)
-        gpu_fallback: If True and GPU OOM error occurs, automatically retry with CPU
+        num_ctx: Context window size (default 2048, sufficient for our prompts) - Ollama only
+        num_gpu: Number of GPU layers (None=auto, 0=CPU only, higher=more GPU) - Ollama only
+        cleanup_interval: Unload/reload model every N queries to prevent memory leaks (0=disabled) - Ollama only
+        gpu_fallback: If True and GPU OOM error occurs, automatically retry with CPU - Ollama only
+        model_provider: "ollama" or "groq" - determines which API to use
 
     Returns:
         Tuple of (results_list, skewed_flags, favoritism_scores)
@@ -983,7 +1347,8 @@ def run_utility_bias_test_with_variations(
                 num_ctx=num_ctx,
                 num_gpu=num_gpu,
                 cleanup_interval=cleanup_interval,
-                gpu_fallback=gpu_fallback
+                gpu_fallback=gpu_fallback,
+                model_provider=model_provider
             )
 
             # Add variation metadata
@@ -1148,7 +1513,8 @@ def run_robust_utility_bias_test(
     num_ctx: int = 2048,
     num_gpu: Optional[int] = None,
     cleanup_interval: int = 100,
-    gpu_fallback: bool = False
+    gpu_fallback: bool = False,
+    model_provider: str = "ollama"
 ) -> Tuple[Dict[str, Any], str]:
     """
     Run a robust utility bias test with automatic variation generation and aggregation.
@@ -1163,10 +1529,11 @@ def run_robust_utility_bias_test(
         progress_callback: Optional callback for progress updates
         system_prompt: System prompt to use for all queries
         num_anchor_variations: Number of anchor variations to use (5 or 10)
-        num_ctx: Context window size (default 2048, sufficient for our prompts)
-        num_gpu: Number of GPU layers (None=auto, 0=CPU only, higher=more GPU)
-        cleanup_interval: Unload/reload model every N queries to prevent memory leaks (default 100)
-        gpu_fallback: If True and GPU OOM error occurs, automatically retry with CPU
+        num_ctx: Context window size (default 2048, sufficient for our prompts) - Ollama only
+        num_gpu: Number of GPU layers (None=auto, 0=CPU only, higher=more GPU) - Ollama only
+        cleanup_interval: Unload/reload model every N queries to prevent memory leaks (default 100) - Ollama only
+        gpu_fallback: If True and GPU OOM error occurs, automatically retry with CPU - Ollama only
+        model_provider: "ollama" or "groq" - determines which API to use
 
     Returns:
         Tuple of (results, status_message)
@@ -1187,7 +1554,8 @@ def run_robust_utility_bias_test(
             num_ctx=num_ctx,
             num_gpu=num_gpu,
             cleanup_interval=cleanup_interval,
-            gpu_fallback=gpu_fallback
+            gpu_fallback=gpu_fallback,
+            model_provider=model_provider
         )
 
         # Step 2: Aggregate results (handles error cases internally)

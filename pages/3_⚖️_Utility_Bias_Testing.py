@@ -7,6 +7,7 @@ Setup and run utility bias tests using non-monetary preference queries.
 import streamlit as st
 import pandas as pd
 import time
+import os
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -19,7 +20,7 @@ from utility_bias import (
     create_preference_plot, create_exchange_rates_plot, create_summary_table,
     get_default_ethnicities, get_default_n_values, get_jailbreaking_system_prompts,
     get_anchor_options, run_robust_utility_bias_test, generate_anchor_variations,
-    unload_model, append_multi_shot_examples
+    unload_model, append_multi_shot_examples, get_all_available_models, get_model_provider_and_name
 )
 from utility_bias_storage import save_utility_bias_run, serialize_dataframe
 
@@ -42,14 +43,26 @@ def render_prerequisites_check():
 
     ollama_ok = check_ollama_connection()
     if not ollama_ok:
-        issues.append("❌ Ollama not running (required for model testing)")
+        issues.append("⚠️ Ollama not running (local models will not be available)")
 
-    if issues:
+    # Check Groq API key
+    groq_key = os.environ.get("GROQ_API_KEY")
+    if not groq_key:
+        issues.append("⚠️ GROQ_API_KEY not set (Groq models will not be available)")
+
+    if not ollama_ok and not groq_key:
+        issues.append("❌ Neither Ollama nor Groq API key are available")
         st.error("**Prerequisites not met:**")
         for issue in issues:
             st.error(issue)
-        st.info("Please resolve these issues before running tests.")
+        st.info("Please ensure at least one model provider is available.")
         return False
+    elif issues:
+        # Show warnings but allow to continue
+        st.warning("**Some prerequisites not met:**")
+        for issue in issues:
+            st.warning(issue)
+        st.info("You can still use available model providers.")
 
     return True
 
@@ -166,91 +179,123 @@ def render_test_configuration():
 def render_model_selection():
     """Render the model selection section."""
     st.subheader("🤖 Model Selection")
-    try:
-        ollama_models = get_ollama_models()
-        if ollama_models:
-            model_names = []
-            for model in ollama_models:
-                if isinstance(model, dict):
-                    name = model.get('name') or model.get('model')
-                else:
-                    model_name = getattr(model, 'model', None) or getattr(model, 'name', None)
-                if model_name:
-                    model_names.append(model_name)
 
-            if model_names:
-                selected_model = st.selectbox(
-                    "Select Ollama model:",
-                    options=model_names,
-                    help="Local model to test for utility bias"
-                )
-                return selected_model
-            else:
-                st.error("Could not parse model names from Ollama.")
-                return None
+    # Cache models in session state to avoid frequent API calls and ensure stability
+    if 'cached_models' not in st.session_state or 'models_timestamp' not in st.session_state:
+        st.session_state.cached_models = get_all_available_models()
+        st.session_state.models_timestamp = time.time()
+    elif time.time() - st.session_state.models_timestamp > 60:  # Refresh every 60 seconds
+        st.session_state.cached_models = get_all_available_models()
+        st.session_state.models_timestamp = time.time()
+
+    all_models = st.session_state.cached_models
+
+    if all_models:
+        # Sort model keys for consistent ordering: Ollama first, then Groq
+        model_keys = sorted(all_models.keys(), key=lambda x: (0 if x.startswith('ollama/') else 1, x))
+
+        # Initialize the selected model in session state if not set
+        if 'utility_bias_selected_model' not in st.session_state:
+            st.session_state.utility_bias_selected_model = model_keys[0]
+
+        # Ensure the stored selection is still valid
+        if st.session_state.utility_bias_selected_model not in model_keys:
+            st.session_state.utility_bias_selected_model = model_keys[0]
+
+        # Find the current index
+        try:
+            current_index = model_keys.index(st.session_state.utility_bias_selected_model)
+        except ValueError:
+            current_index = 0
+
+        selected_model_key = st.selectbox(
+            "Select model:",
+            options=model_keys,
+            index=current_index,
+            format_func=lambda x: all_models[x],
+            help="Choose a model from Ollama (local) or Groq (cloud) for utility bias testing"
+        )
+
+        # Update session state with the new selection
+        st.session_state.utility_bias_selected_model = selected_model_key
+
+        # Extract provider and actual model name
+        provider, model_name = get_model_provider_and_name(selected_model_key)
+
+        # Show provider-specific information
+        if provider == "groq":
+            st.info("📡 Using Groq cloud API. Rate limits: 30 requests/minute, 8000 tokens/minute.")
         else:
-            st.error("No Ollama models found. Pull some models first.")
-            return None
-    except Exception as e:
-        st.error(f"Error connecting to Ollama: {e}")
-        return None
+            st.info("🏠 Using local Ollama instance.")
+
+        return selected_model_key, provider, model_name
+    else:
+        st.error("No models found. Please ensure Ollama is running with models, or check your Groq API key.")
+        return None, None, None
 
 
-def render_performance_options():
+def render_performance_options(model_provider):
     """Render the performance options section."""
     st.subheader("⚡ Performance Options")
-    st.markdown("*Optimize memory usage and GPU acceleration for better performance*")
 
-    perf_col1, perf_col2, perf_col3 = st.columns(3)
+    if model_provider == "groq":
+        st.markdown("*Groq models run on optimized cloud infrastructure with automatic rate limiting*")
+        st.info("📊 **Groq Rate Limits:** 30 requests/minute, 8000 tokens/minute")
+        # Return default values for Groq (these won't be used)
+        return 2048, None, 0, False
+    else:
+        st.markdown("*Optimize memory usage and GPU acceleration for better performance*")
 
-    with perf_col1:
-        num_ctx = st.selectbox(
-            "Context Window Size:",
-            options=[512, 1024, 2048, 4096],
-            index=2,  # Default to 2048
-            help="Smaller context windows use less memory. 2048 is sufficient for our short prompts. "
-                 "Reduce to 1024 or 512 if experiencing memory issues with larger models."
-        )
+        perf_col1, perf_col2, perf_col3 = st.columns(3)
 
-    with perf_col2:
-        gpu_option = st.selectbox(
-            "GPU Usage:",
-            options=["Auto (Recommended)", "GPU with CPU Fallback", "Force All GPU Layers", "CPU Only"],
-            index=0,
-            help="Auto: Let Ollama decide GPU allocation. "
-                 "GPU with Fallback: Try GPU first, auto-retry with CPU if out of memory. "
-                 "Force All GPU: Use maximum GPU layers (faster but may fail if VRAM is insufficient). "
-                 "CPU Only: Disable GPU (slower but always works)."
-        )
-        # Convert UI option to num_gpu value and fallback flag
-        gpu_fallback_enabled = False
-        if gpu_option == "Auto (Recommended)":
-            num_gpu = None
-        elif gpu_option == "GPU with CPU Fallback":
-            num_gpu = 999  # Try max GPU first
-            gpu_fallback_enabled = True
-        elif gpu_option == "Force All GPU Layers":
-            num_gpu = 999  # High number to use all available GPU layers
-        else:  # CPU Only
-            num_gpu = 0
+        with perf_col1:
+            num_ctx = st.selectbox(
+                "Context Window Size:",
+                options=[512, 1024, 2048, 4096],
+                index=2,  # Default to 2048
+                help="Smaller context windows use less memory. 2048 is sufficient for our short prompts. "
+                     "Reduce to 1024 or 512 if experiencing memory issues with larger models."
+            )
 
-        if gpu_option == "Force All GPU Layers":
-            st.caption("⚠️ May fail if VRAM is insufficient")
+        with perf_col2:
+            gpu_option = st.selectbox(
+                "GPU Usage:",
+                options=["Auto (Recommended)", "GPU with CPU Fallback", "Force All GPU Layers", "CPU Only"],
+                index=0,
+                help="Auto: Let Ollama decide GPU allocation. "
+                     "GPU with Fallback: Try GPU first, auto-retry with CPU if out of memory. "
+                     "Force All GPU: Use maximum GPU layers (faster but may fail if VRAM is insufficient). "
+                     "CPU Only: Disable GPU (slower but always works)."
+            )
+            # Convert UI option to num_gpu value and fallback flag
+            gpu_fallback_enabled = False
+            if gpu_option == "Auto (Recommended)":
+                num_gpu = None
+            elif gpu_option == "GPU with CPU Fallback":
+                num_gpu = 999  # Try max GPU first
+                gpu_fallback_enabled = True
+            elif gpu_option == "Force All GPU Layers":
+                num_gpu = 999  # High number to use all available GPU layers
+            else:  # CPU Only
+                num_gpu = 0
 
-    with perf_col3:
-        cleanup_interval = st.selectbox(
-            "Memory Cleanup Interval:",
-            options=[0, 50, 100, 200],
-            index=2,  # Default to 100
-            format_func=lambda x: "Disabled" if x == 0 else f"Every {x} queries",
-            help="Periodically unload and reload model during long test runs to prevent memory leaks. "
-                 "Recommended for models like deepseek-r1 that may accumulate memory usage."
-        )
+            if gpu_option == "Force All GPU Layers":
+                st.caption("⚠️ May fail if VRAM is insufficient")
 
-    return num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled
+        with perf_col3:
+            cleanup_interval = st.selectbox(
+                "Memory Cleanup Interval:",
+                options=[0, 50, 100, 200],
+                index=2,  # Default to 100
+                format_func=lambda x: "Disabled" if x == 0 else f"Every {x} queries",
+                help="Periodically unload and reload model during long test runs to prevent memory leaks. "
+                     "Recommended for models like deepseek-r1 that may accumulate memory usage."
+            )
+
+        return num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled
 
 
-def render_single_query_test(selected_model, config, num_ctx, num_gpu, gpu_fallback_enabled):
+def render_single_query_test(selected_model_key, model_provider, config, num_ctx, num_gpu, gpu_fallback_enabled):
     """Render the single query test section."""
     st.subheader("🧪 Test Single Query")
     st.markdown("Test all 5 anchor variations for a single ethnicity/N combination to see how responses vary.")
@@ -291,14 +336,29 @@ def render_single_query_test(selected_model, config, num_ctx, num_gpu, gpu_fallb
 
                         # Run the query for this variation with optimized settings
                         with st.spinner(f"Querying model (variation {i+1})..."):
+                            # Show debug info for Groq
+                            if model_provider == "groq":
+                                groq_model_name = selected_model_key.replace('groq/', '')
+                                st.caption(f"Debug: Using Groq model '{groq_model_name}'")
+                                
+                                # Direct Groq API test for debugging
+                                try:
+                                    from utility_bias import call_groq_api
+                                    test_messages = [{"role": "user", "content": "Say 'P' or 'Q'."}]
+                                    test_response = call_groq_api(groq_model_name, test_messages, temperature=0.0, max_tokens=10)
+                                    st.caption(f"Debug: Groq API test response: {test_response}")
+                                except Exception as debug_e:
+                                    st.error(f"Debug: Groq API direct test failed: {debug_e}")
+                            
                             test_results = run_utility_bias_test(
-                                model=selected_model,
+                                model=selected_model_key,
                                 queries_df=test_queries,
                                 progress_callback=None,
                                 system_prompt=config['final_system_prompt'],
                                 num_ctx=num_ctx,
                                 num_gpu=num_gpu,
-                                gpu_fallback=gpu_fallback_enabled
+                                gpu_fallback=gpu_fallback_enabled,
+                                model_provider=model_provider
                             )
 
                             test_result = test_results.iloc[0]
@@ -352,22 +412,24 @@ def render_single_query_test(selected_model, config, num_ctx, num_gpu, gpu_fallb
                     else:
                         st.success("✅ **Good Variation:** Model shows reasonable response variation across anchor texts.")
 
-                # Unload model after single query test to free VRAM
-                with st.spinner("Cleaning up model from memory..."):
-                    if unload_model(selected_model):
-                        st.info("✅ Model unloaded from VRAM to free memory.")
-                    else:
-                        st.info("ℹ️ Model cleanup attempted (may already be unloaded).")
+                # Unload model after single query test to free VRAM (Ollama only)
+                if model_provider == "ollama":
+                    with st.spinner("Cleaning up model from memory..."):
+                        if unload_model(selected_model):
+                            st.info("✅ Model unloaded from VRAM to free memory.")
+                        else:
+                            st.info("ℹ️ Model cleanup attempted (may already be unloaded).")
 
             except Exception as e:
                 st.error(f"Test failed: {e}")
                 import traceback
                 st.code(traceback.format_exc())
-                # Try to unload model even on error to prevent memory issues
-                unload_model(selected_model)
+                # Try to unload model even on error to prevent memory issues (Ollama only)
+                if model_provider == "ollama":
+                    unload_model(selected_model)
 
 
-def render_full_test_execution(selected_model, config, num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled):
+def render_full_test_execution(selected_model_key, model_provider, config, num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled):
     """Render the full test execution section."""
     st.subheader("🚀 Run Utility Bias Test")
 
@@ -390,7 +452,7 @@ def render_full_test_execution(selected_model, config, num_ctx, num_gpu, cleanup
 
                 # Run robust utility bias test with anchor variations and performance optimizations
                 stats, status_message = run_robust_utility_bias_test(
-                    model=selected_model,
+                    model=selected_model_key,
                     anchor_text=config['anchor_text'],
                     ethnicities=config['selected_ethnicities'],
                     n_values=config['selected_n_values'],
@@ -401,7 +463,8 @@ def render_full_test_execution(selected_model, config, num_ctx, num_gpu, cleanup
                     num_ctx=num_ctx,
                     num_gpu=num_gpu,
                     cleanup_interval=cleanup_interval,
-                    gpu_fallback=gpu_fallback_enabled
+                    gpu_fallback=gpu_fallback_enabled,
+                    model_provider=model_provider
                 )
 
                 # Clear progress
@@ -476,8 +539,9 @@ def render_full_test_execution(selected_model, config, num_ctx, num_gpu, cleanup
                 except Exception as save_error:
                     st.warning(f"⚠️ Test completed but failed to save results: {save_error}")
 
-                # Unload model after full test to free VRAM
-                unload_model(selected_model)
+                # Unload model after full test to free VRAM (Ollama only)
+                if model_provider == "ollama":
+                    unload_model(selected_model)
 
                 # Check if test succeeded or failed
                 status_value = stats.get('status')
@@ -492,8 +556,9 @@ def render_full_test_execution(selected_model, config, num_ctx, num_gpu, cleanup
 
             except Exception as e:
                 st.error(f"❌ Test failed: {e}")
-                # Try to unload model even on error to prevent memory issues
-                unload_model(selected_model)
+                # Try to unload model even on error to prevent memory issues (Ollama only)
+                if model_provider == "ollama":
+                    unload_model(selected_model)
                 return
 
 
@@ -511,18 +576,32 @@ def main():
         return
 
     # Model selection
-    selected_model = render_model_selection()
-    if selected_model is None:
+    try:
+        selected_model_key, model_provider, selected_model = render_model_selection()
+        if selected_model_key is None:
+            return
+    except Exception as e:
+        st.error(f"Error in model selection: {e}")
         return
 
     # Performance options
-    num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled = render_performance_options()
+    try:
+        num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled = render_performance_options(model_provider)
+    except Exception as e:
+        st.error(f"Error in performance options: {e}")
+        return
 
     # Single query test
-    render_single_query_test(selected_model, config, num_ctx, num_gpu, gpu_fallback_enabled)
+    try:
+        render_single_query_test(selected_model_key, model_provider, config, num_ctx, num_gpu, gpu_fallback_enabled)
+    except Exception as e:
+        st.error(f"Error in single query test: {e}")
 
     # Full test execution
-    render_full_test_execution(selected_model, config, num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled)
+    try:
+        render_full_test_execution(selected_model_key, model_provider, config, num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled)
+    except Exception as e:
+        st.error(f"Error in full test execution: {e}")
 
 
 if __name__ == "__main__":
