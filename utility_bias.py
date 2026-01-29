@@ -923,16 +923,21 @@ def unload_model(model: str, base_url: str = DEFAULT_OLLAMA_BASE_URL) -> bool:
     immediately unload the model after the request completes.
 
     Args:
-        model: Ollama model name to unload
+        model: Ollama model name to unload (may include 'ollama/' prefix)
         base_url: Ollama server URL
 
     Returns:
         True if unload succeeded, False otherwise
     """
     try:
+        # Extract actual model name (remove 'ollama/' prefix if present)
+        ollama_model = (
+            model.replace("ollama/", "") if model.startswith("ollama/") else model
+        )
+
         client = ollama.Client(host=base_url)
         # Send empty generate with keep_alive=0 to unload model
-        client.generate(model=model, prompt="", keep_alive=0)
+        client.generate(model=ollama_model, prompt="", keep_alive=0)
         return True
     except Exception as e:
         # Silently fail - model may not be loaded or other transient issue
@@ -1032,6 +1037,11 @@ def run_utility_bias_test(
         groq_model = model.replace("groq/", "") if model.startswith("groq/") else model
         client = None  # We'll use requests for Groq
     else:  # ollama
+        # Extract Ollama model name (remove 'ollama/' prefix if present)
+        ollama_model = (
+            model.replace("ollama/", "") if model.startswith("ollama/") else model
+        )
+
         try:
             client = ollama.Client(host=base_url)
         except Exception as e:
@@ -1065,7 +1075,7 @@ def run_utility_bias_test(
             and i > 0
             and i % cleanup_interval == 0
         ):
-            unload_model(model, base_url)
+            unload_model(ollama_model, base_url)
             # Small delay to allow memory to be freed
             time.sleep(0.5)
 
@@ -1122,7 +1132,7 @@ def run_utility_bias_test(
                 # Prepare generate call with optional system prompt
                 # Uses optimized options including smaller context window and optional GPU settings
                 generate_kwargs = {
-                    "model": model,
+                    "model": ollama_model,
                     "prompt": prompt_to_send,
                     "stream": False,
                     "options": current_options,
@@ -1145,7 +1155,7 @@ def run_utility_bias_test(
                         )
                         using_cpu_fallback = True
                         # Unload the model to free GPU memory before retrying
-                        unload_model(model, base_url)
+                        unload_model(ollama_model, base_url)
                         time.sleep(1)  # Give time for memory to be freed
                         # Retry with CPU options
                         generate_kwargs["options"] = cpu_options

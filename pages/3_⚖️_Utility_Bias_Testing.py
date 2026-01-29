@@ -938,6 +938,17 @@ def render_thurstonian_testing_ui():
         )
 
     with al_col6:
+        th_intermediate_n = st.number_input(
+            "Intermediate N per interval:",
+            min_value=0,
+            max_value=5,
+            value=1,
+            help="Number of intermediate N values to add between consecutive grid points (0 = use original grid only)",
+            key="th_intermediate_n",
+        )
+
+    # Move epochs to a new row or adjust layout
+    with st.container():
         th_num_epochs = st.selectbox(
             "Model fitting epochs:",
             options=[100, 500, 1000, 2000],
@@ -1091,6 +1102,7 @@ def _run_thurstonian_test(
             num_queries_per_iteration=queries_per_iteration,
             K=K,
             seed=42,
+            num_intermediate_per_interval=th_intermediate_n,
         )
 
         # Get anchor variations for K responses
@@ -1112,6 +1124,10 @@ def _run_thurstonian_test(
             status_text.text(
                 f"Initial sampling: {i+1}/{len(initial_options)} - {option.ethnicity}, N={option.n_value:,}"
             )
+
+            # Ensure option is registered in model
+            if option.id not in model.options_by_id:
+                model.add_option(option)
 
             # Query with K anchor variations
             responses = _query_option_with_variations(
@@ -1190,6 +1206,10 @@ def _run_thurstonian_test(
                 status_text.text(
                     f"Iteration {iteration + 1}: {i+1}/{len(next_options)} - {option.ethnicity}, N={option.n_value:,}"
                 )
+
+                # Ensure option is registered in model
+                if option.id not in model.options_by_id:
+                    model.add_option(option)
 
                 # Query with K anchor variations
                 responses = _query_option_with_variations(

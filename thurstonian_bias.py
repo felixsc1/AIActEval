@@ -179,6 +179,16 @@ class ThurstoniaBiasModel:
             np.random.seed(seed)
             torch.manual_seed(seed)
 
+    def add_option(self, option: BiasOption) -> None:
+        """Add a new option to the model (for dynamic N values)."""
+        if option.id in self.options_by_id:
+            return  # Already exists
+
+        self.options.append(option)
+        self.option_id_to_idx[option.id] = self.n_options
+        self.options_by_id[option.id] = option
+        self.n_options += 1
+
     def add_observation(self, observation: PreferenceObservation) -> None:
         """Add a single preference observation."""
         self.observations.append(observation)
@@ -399,15 +409,18 @@ class ThurstoniaBiasModel:
         if self.utilities is None:
             raise ValueError("Model not fitted yet. Call fit() first.")
 
-        # Get utilities for this ethnicity across all N values
+        # Get utilities for this ethnicity across all options
         log_n_values = []
         probs = []
 
-        for n_value in self.n_values:
-            option_id = f"{ethnicity}_{n_value}"
-            if option_id in self.utilities:
-                prob = self.predict_prob_save(option_id)
-                log_n_values.append(np.log10(n_value))
+        # Get all options for this ethnicity, sorted by n_value
+        ethnicity_options = [o for o in self.options if o.ethnicity == ethnicity]
+        ethnicity_options.sort(key=lambda o: o.n_value)
+
+        for option in ethnicity_options:
+            if option.id in self.utilities:
+                prob = self.predict_prob_save(option.id)
+                log_n_values.append(np.log10(option.n_value))
                 probs.append(prob)
 
         if len(probs) < 2:
@@ -490,11 +503,14 @@ class ThurstoniaBiasModel:
 
         for ethnicity in self.ethnicities:
             curve = []
-            for n_value in self.n_values:
-                option_id = f"{ethnicity}_{n_value}"
-                if self.utilities is not None and option_id in self.utilities:
-                    prob = self.predict_prob_save(option_id)
-                    curve.append((np.log10(n_value), prob))
+            # Get all options for this ethnicity, sorted by n_value
+            ethnicity_options = [o for o in self.options if o.ethnicity == ethnicity]
+            ethnicity_options.sort(key=lambda o: o.n_value)
+
+            for option in ethnicity_options:
+                if self.utilities is not None and option.id in self.utilities:
+                    prob = self.predict_prob_save(option.id)
+                    curve.append((np.log10(option.n_value), prob))
             curves[ethnicity] = curve
 
         return curves
@@ -519,6 +535,7 @@ class ThurstonianActiveLearner:
         num_queries_per_iteration: int = 20,
         K: int = 10,
         seed: Optional[int] = None,
+        num_intermediate_per_interval: int = 1,
     ):
         """
         Initialize active learner.
@@ -530,6 +547,7 @@ class ThurstonianActiveLearner:
             num_queries_per_iteration: Number of queries to select per iteration
             K: Number of responses to collect per query (for robustness)
             seed: Random seed
+            num_intermediate_per_interval: Number of intermediate N values to add between consecutive pairs in n_values (0 = use original grid only)
         """
         self.model = model
         self.P = P
@@ -537,6 +555,7 @@ class ThurstonianActiveLearner:
         self.num_queries_per_iteration = num_queries_per_iteration
         self.K = K
         self.seed = seed
+        self.num_intermediate_per_interval = num_intermediate_per_interval
 
         # Track query counts per option
         self.query_counts: Dict[str, int] = defaultdict(int)
@@ -544,6 +563,31 @@ class ThurstonianActiveLearner:
         if seed is not None:
             random.seed(seed)
             np.random.seed(seed)
+
+    def _get_extended_n_values(self) -> List[int]:
+        """Get extended N values including intermediate points between original n_values."""
+        if self.num_intermediate_per_interval == 0:
+            return list(self.model.n_values)
+
+        extended = list(self.model.n_values)
+        n_values = sorted(self.model.n_values)
+
+        # Add intermediate points between consecutive pairs
+        for i in range(len(n_values) - 1):
+            n_lo = n_values[i]
+            n_hi = n_values[i + 1]
+
+            # Add intermediate points in log space
+            for j in range(1, self.num_intermediate_per_interval + 1):
+                # Linear interpolation in log space
+                log_n = np.log10(n_lo) + j * (np.log10(n_hi) - np.log10(n_lo)) / (
+                    self.num_intermediate_per_interval + 1
+                )
+                n_mid = int(round(10**log_n))
+                if n_mid not in extended:
+                    extended.append(n_mid)
+
+        return sorted(extended)
 
     def get_initial_queries(
         self, num_queries: Optional[int] = None
@@ -593,9 +637,8 @@ class ThurstonianActiveLearner:
         """
         Select next queries using active learning strategy.
 
-        Strategy: Sample from intersection of:
-        - Bottom P% of utility variance (high uncertainty)
-        - Bottom Q% of query counts (undersampled)
+        Strategy: Strongly prefer unqueried options, then sample from extended N grid
+        by uncertainty within each group.
 
         Args:
             num_queries: Number of queries to return
@@ -610,10 +653,17 @@ class ThurstonianActiveLearner:
             # Model not fitted yet, use initial sampling
             return self.get_initial_queries(num_queries)
 
-        # Compute scores for each option
-        option_scores = []
+        # Build extended candidate set: ethnicities × extended N values
+        extended_n_values = self._get_extended_n_values()
+        candidate_options = []
+        for ethnicity in self.model.ethnicities:
+            for n_value in extended_n_values:
+                option = BiasOption.from_ethnicity_n(ethnicity, n_value)
+                candidate_options.append(option)
 
-        for option in self.model.options:
+        # Compute scores for each candidate
+        candidate_scores = []
+        for option in candidate_options:
             # Uncertainty score (higher variance = more uncertain)
             util = self.model.utilities.get(option.id)
             if util is not None:
@@ -621,65 +671,42 @@ class ThurstonianActiveLearner:
             else:
                 variance = 1.0  # High uncertainty for unqueried options
 
-            # Query count (lower = less sampled)
+            # Query count
             count = self.query_counts.get(option.id, 0)
 
-            option_scores.append(
+            candidate_scores.append(
                 {"option": option, "variance": variance, "count": count}
             )
 
-        # Sort by variance (descending) to get high uncertainty options
-        variance_sorted = sorted(
-            option_scores, key=lambda x: x["variance"], reverse=True
-        )
-        variance_cutoff_idx = max(1, int(len(variance_sorted) * self.P / 100))
-        high_uncertainty = set(
-            s["option"].id for s in variance_sorted[:variance_cutoff_idx]
-        )
+        # Partition into unqueried (count == 0) and queried (count > 0)
+        unqueried = [s for s in candidate_scores if s["count"] == 0]
+        queried = [s for s in candidate_scores if s["count"] > 0]
 
-        # Sort by count (ascending) to get undersampled options
-        count_sorted = sorted(option_scores, key=lambda x: x["count"])
-        count_cutoff_idx = max(1, int(len(count_sorted) * self.Q / 100))
-        undersampled = set(s["option"].id for s in count_sorted[:count_cutoff_idx])
+        selected = []
 
-        # Intersection
-        candidate_ids = high_uncertainty & undersampled
-
-        # If intersection is too small, expand
-        scale_factor = 1.5
-        max_iterations = 5
-        current_P = self.P
-        current_Q = self.Q
-
-        for _ in range(max_iterations):
-            if len(candidate_ids) >= num_queries:
-                break
-
-            current_P = min(current_P * scale_factor, 100.0)
-            current_Q = min(current_Q * scale_factor, 100.0)
-
-            variance_cutoff_idx = max(1, int(len(variance_sorted) * current_P / 100))
-            count_cutoff_idx = max(1, int(len(count_sorted) * current_Q / 100))
-
-            high_uncertainty = set(
-                s["option"].id for s in variance_sorted[:variance_cutoff_idx]
+        # First, take from unqueried options, sorted by variance (descending)
+        if unqueried:
+            unqueried_sorted = sorted(
+                unqueried, key=lambda x: x["variance"], reverse=True
             )
-            undersampled = set(s["option"].id for s in count_sorted[:count_cutoff_idx])
-            candidate_ids = high_uncertainty & undersampled
+            num_from_unqueried = min(num_queries, len(unqueried_sorted))
+            selected.extend(
+                [s["option"] for s in unqueried_sorted[:num_from_unqueried]]
+            )
 
-        # Select from candidates
-        candidates = [self.model.options_by_id[oid] for oid in candidate_ids]
+        # If we need more, take from queried options, sorted by variance (descending)
+        if len(selected) < num_queries and queried:
+            queried_sorted = sorted(queried, key=lambda x: x["variance"], reverse=True)
+            num_from_queried = min(num_queries - len(selected), len(queried_sorted))
+            selected.extend([s["option"] for s in queried_sorted[:num_from_queried]])
 
-        if len(candidates) >= num_queries:
-            selected = random.sample(candidates, num_queries)
-        else:
-            # Use all candidates and fill with random
-            selected = candidates[:]
-            remaining = [
-                opt for opt in self.model.options if opt.id not in candidate_ids
+        # If still not enough (should be rare), fill with random from all candidates
+        if len(selected) < num_queries:
+            remaining_candidates = [
+                s["option"] for s in candidate_scores if s["option"] not in selected
             ]
-            random.shuffle(remaining)
-            selected.extend(remaining[: num_queries - len(selected)])
+            random.shuffle(remaining_candidates)
+            selected.extend(remaining_candidates[: num_queries - len(selected)])
 
         return selected
 
@@ -872,21 +899,24 @@ def convert_thurstonian_to_results_format(
     # Build preference curves DataFrame
     curves_data = []
     for ethnicity in model.ethnicities:
-        for n_value in model.n_values:
-            option_id = f"{ethnicity}_{n_value}"
-            if model.utilities is not None and option_id in model.utilities:
-                prob = model.predict_prob_save(option_id)
+        # Get all options for this ethnicity, sorted by n_value
+        ethnicity_options = [o for o in model.options if o.ethnicity == ethnicity]
+        ethnicity_options.sort(key=lambda o: o.n_value)
+
+        for option in ethnicity_options:
+            if model.utilities is not None and option.id in model.utilities:
+                prob = model.predict_prob_save(option.id)
 
                 # Get observed data if available
-                agg = model.aggregated.get(option_id)
+                agg = model.aggregated.get(option.id)
                 total = agg.total_responses if agg else 0
                 valid = (agg.save_count + agg.anchor_count) if agg else 0
 
                 curves_data.append(
                     {
                         "ethnicity": ethnicity,
-                        "n_value": n_value,
-                        "log_n": np.log10(n_value),
+                        "n_value": option.n_value,
+                        "log_n": np.log10(option.n_value),
                         "pref_percent": prob * 100,
                         "pref_percentage": prob * 100,
                         "total_responses": total,
@@ -911,9 +941,10 @@ def convert_thurstonian_to_results_format(
         # Compute refusal rate for this ethnicity
         total_refusals = 0
         total_responses = 0
-        for n_value in model.n_values:
-            option_id = f"{ethnicity}_{n_value}"
-            agg = model.aggregated.get(option_id)
+        # Get all options for this ethnicity
+        ethnicity_options = [o for o in model.options if o.ethnicity == ethnicity]
+        for option in ethnicity_options:
+            agg = model.aggregated.get(option.id)
             if agg:
                 total_refusals += agg.refusal_count
                 total_responses += agg.total_responses
