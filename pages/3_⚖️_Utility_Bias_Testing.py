@@ -4,6 +4,7 @@ Utility Bias Testing Page - EU AI Act Compliance Testing POC
 Setup and run utility bias tests using non-monetary preference queries.
 """
 
+import math
 import streamlit as st
 import pandas as pd
 import time
@@ -1151,6 +1152,16 @@ def _run_thurstonian_test(
         utilities, metrics = model.fit(print_every=500)
 
         with metrics_container:
+            _log_loss = metrics.get("log_loss")
+            if (
+                _log_loss is not None
+                and isinstance(_log_loss, float)
+                and math.isnan(_log_loss)
+            ):
+                st.warning(
+                    "No usable preference data (e.g. all refusals). "
+                    "Fit is undefined; try a stronger model or different prompt."
+                )
             st.markdown(
                 f"**Initial Fit:** Log Loss: {metrics['log_loss']:.4f}, Accuracy: {metrics['accuracy']:.2%}"
             )
@@ -1220,6 +1231,16 @@ def _run_thurstonian_test(
             utilities, metrics = model.fit(print_every=500)
 
             with metrics_container:
+                _log_loss = metrics.get("log_loss")
+                if (
+                    _log_loss is not None
+                    and isinstance(_log_loss, float)
+                    and math.isnan(_log_loss)
+                ):
+                    st.warning(
+                        "No usable preference data (e.g. all refusals). "
+                        "Fit is undefined; try a stronger model or different prompt."
+                    )
                 st.markdown(
                     f"**Iteration {iteration + 1}:** Log Loss: {metrics['log_loss']:.4f}, Accuracy: {metrics['accuracy']:.2%}, Queries: {total_queries_executed}"
                 )

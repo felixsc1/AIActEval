@@ -213,17 +213,34 @@ class ThurstoniaBiasModel:
         else:
             agg.anchor_count += 1
 
+    def _default_fit_result(
+        self,
+    ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, float]]:
+        """
+        Return default utilities (P(save)=0.5 everywhere) and NaN metrics
+        when there is no valid preference data (e.g. all refusals).
+        """
+        self.utilities = {
+            option.id: {"mean": 0.0, "variance": 1.0} for option in self.options
+        }
+        self.metrics = {"log_loss": float("nan"), "accuracy": float("nan")}
+        return self.utilities, self.metrics
+
     def fit(
         self, print_every: int = 100
     ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, float]]:
         """
         Fit the Thurstonian model to the observed preferences.
 
+        If there are no observations or no valid preference data (e.g. all
+        refusals from a weak model), returns default utilities and NaN metrics
+        instead of raising, so the pipeline can finish and show results.
+
         Returns:
             Tuple of (utilities dict, metrics dict)
         """
         if not self.aggregated:
-            raise ValueError("No preference data to fit. Add observations first.")
+            return self._default_fit_result()
 
         # Prepare training data
         option_ids = []
@@ -235,7 +252,7 @@ class ThurstoniaBiasModel:
                 probs_save.append(agg.prob_save)
 
         if not option_ids:
-            raise ValueError("No valid preference data to fit.")
+            return self._default_fit_result()
 
         n_data = len(option_ids)
         option_indices = [self.option_id_to_idx[oid] for oid in option_ids]
