@@ -726,7 +726,11 @@ def fit_thurstonian_to_grid_results(
             ethnicity = row['ethnicity']
             n_value = int(row['n_value'])
             pref_pct = row['pref_percentage']  # Percentage preferring Q (save lives)
-            
+
+            # Skip rows with missing preference percentages
+            if pd.isna(pref_pct):
+                continue
+
             option = BiasOption.from_ethnicity_n(ethnicity, n_value)
             
             # Create synthetic aggregated preference
