@@ -1514,7 +1514,7 @@ def render_posthoc_fitting_ui():
                     }
                 )
 
-            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
+            st.dataframe(pd.DataFrame(comparison_data), width="stretch")
 
             # Option to save as new Thurstonian result
             st.markdown("---")
@@ -1647,7 +1647,7 @@ def render_posthoc_fitting_ui():
                     }
                 )
 
-            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
+            st.dataframe(pd.DataFrame(comparison_data), width="stretch")
 
         # Option to save as new Thurstonian result
         st.markdown("---")
