@@ -16,6 +16,7 @@ load_dotenv()
 
 # Import our modules
 from evaluator import check_ollama_connection, get_ollama_models
+
 from utility_bias import (
     generate_utility_queries,
     run_utility_bias_test,
@@ -24,6 +25,9 @@ from utility_bias import (
     create_exchange_rates_plot,
     create_summary_table,
     get_default_ethnicities,
+    get_default_sexes,
+    get_default_religions,
+    get_bias_type_config,
     get_default_n_values,
     get_jailbreaking_system_prompts,
     get_anchor_options,
@@ -45,8 +49,8 @@ def render_header():
     st.markdown(
         """
     Test for implicit bias in LLMs using non-monetary preference queries. This method compares
-    scientific advancement against saving lives across different ethnicities to quantify hidden biases
-    through statistical analysis of preference patterns.
+    scientific advancement against saving lives across different groups (ethnicities, sexes, or religions)
+    to quantify hidden biases through statistical analysis of preference patterns.
     """
     )
 
@@ -85,20 +89,32 @@ def render_test_configuration():
     """Render the test configuration section."""
     st.subheader("⚙️ Test Configuration")
 
+    # Bias type selection
+    st.markdown("**Bias Dimension**")
+    bias_type = st.radio(
+        "Select the type of bias to test:",
+        options=["ethnicity", "sex", "religion"],
+        format_func=lambda x: {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[x],
+        index=0,  # Default to ethnicity
+        horizontal=True,
+        help="Choose the demographic dimension for bias testing: ethnicities, sexes, or religions.",
+    )
+
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("**Ethnicities to Test**")
-        default_ethnicities = get_default_ethnicities()
-        selected_ethnicities = st.multiselect(
-            "Select ethnicities:",
-            options=default_ethnicities,
-            default=default_ethnicities,
-            help="Ethnicities to include in bias testing",
+        # Get display label and default options for the selected bias type
+        category_label, default_options = get_bias_type_config(bias_type)
+        st.markdown(f"**{category_label}s to Test**")
+        selected_categories = st.multiselect(
+            f"Select {category_label.lower()}s:",
+            options=default_options,
+            default=default_options,
+            help=f"{category_label}s to include in bias testing",
         )
 
-        if not selected_ethnicities:
-            st.warning("Please select at least one ethnicity.")
+        if not selected_categories:
+            st.warning(f"Please select at least one {category_label.lower()}.")
             return None
 
     with col2:
@@ -189,7 +205,8 @@ def render_test_configuration():
             )
 
     return {
-        "selected_ethnicities": selected_ethnicities,
+        "bias_type": bias_type,
+        "selected_categories": selected_categories,
         "selected_n_values": selected_n_values,
         "anchor_text": anchor_text,
         "selected_anchor_key": selected_anchor_key,
@@ -345,15 +362,19 @@ def render_single_query_test(
     selected_model_key, model_provider, config, num_ctx, num_gpu, gpu_fallback_enabled
 ):
     """Render the single query test section."""
+    # Get display label for the bias type
+    _, default_options = get_bias_type_config(config["bias_type"])
+    category_label = {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[config["bias_type"]]
+
     st.subheader("🧪 Test Single Query")
     st.markdown(
-        "Test all 5 anchor variations for a single ethnicity/N combination to see how responses vary."
+        f"Test all 5 anchor variations for a single {category_label.lower()}/N combination to see how responses vary."
     )
 
     test_col1, test_col2 = st.columns([1, 1])
     with test_col1:
-        test_ethnicity = st.selectbox(
-            "Test Ethnicity:", options=config["selected_ethnicities"], key="test_eth"
+        test_category = st.selectbox(
+            f"Test {category_label}:", options=config["selected_categories"], key="test_category"
         )
         test_n = st.number_input(
             "Test N value:", min_value=1, value=100, step=1, key="test_n"
@@ -369,7 +390,7 @@ def render_single_query_test(
                 )
 
                 st.markdown(f"**Testing {len(anchor_variations)} anchor variations:**")
-                st.markdown("*Each variation tests the same ethnicity/N combination*")
+                st.markdown(f"*Each variation tests the same {category_label.lower()}/N combination*")
 
                 variation_results = []
 
@@ -377,9 +398,10 @@ def render_single_query_test(
                     with st.expander(f"Variation {i+1}", expanded=(i == 0)):
                         # Generate query for this variation
                         test_queries = generate_utility_queries(
-                            ethnicities=[test_ethnicity],
+                            ethnicities=[test_category],
                             n_values=[test_n],
                             anchor=variation,
+                            bias_type=config["bias_type"],
                         )
 
                         test_query = test_queries.iloc[0]["query"]
@@ -538,12 +560,17 @@ def render_full_test_execution(
     st.subheader("🚀 Run Utility Bias Test")
 
     # Show test summary
-    base_queries = len(config["selected_ethnicities"]) * len(
+    base_queries = len(config["selected_categories"]) * len(
         config["selected_n_values"]
     )
     total_queries = base_queries * config["num_anchor_variations"]
+
+    # Get category label for display
+    _, default_options = get_bias_type_config(config["bias_type"])
+    category_label = {"ethnicity": "ethnicity", "sex": "sex", "religion": "religion"}[config["bias_type"]]
+
     st.info(
-        f"**Test will generate {total_queries} queries** ({len(config['selected_ethnicities'])} ethnicities × {len(config['selected_n_values'])} N values × {config['num_anchor_variations']} anchor variations)"
+        f"**Test will generate {total_queries} queries** ({len(config['selected_categories'])} {category_label}s × {len(config['selected_n_values'])} N values × {config['num_anchor_variations']} anchor variations)"
     )
 
     if st.button("🧪 Run Utility Bias Test", type="primary", width="stretch"):
@@ -564,8 +591,9 @@ def render_full_test_execution(
                 stats, status_message = run_robust_utility_bias_test(
                     model=selected_model_key,
                     anchor_text=config["anchor_text"],
-                    ethnicities=config["selected_ethnicities"],
+                    ethnicities=config["selected_categories"],
                     n_values=config["selected_n_values"],
+                    bias_type=config["bias_type"],
                     base_url="http://localhost:11434",
                     progress_callback=progress_callback,
                     system_prompt=config["final_system_prompt"],
@@ -591,7 +619,8 @@ def render_full_test_execution(
                     "stats": stats,
                     "config": {
                         "model": selected_model_key,
-                        "ethnicities": config["selected_ethnicities"],
+                        "bias_type": config["bias_type"],
+                        "ethnicities": config["selected_categories"],  # Keep for backward compatibility
                         "n_values": config["selected_n_values"],
                         "anchor": config["anchor_text"],
                         "system_prompt": config[
@@ -612,7 +641,8 @@ def render_full_test_execution(
                         "gpu_fallback": gpu_fallback_enabled,
                     },
                     "test_config": {
-                        "ethnicities": config["selected_ethnicities"],
+                        "bias_type": config["bias_type"],
+                        "ethnicities": config["selected_categories"],  # Keep for backward compatibility
                         "n_values": config["selected_n_values"],
                         "anchor_key": config["selected_anchor_key"],
                         "anchor_text": config["anchor_text"],
@@ -756,7 +786,7 @@ def render_thurstonian_tab():
     """Render the Thurstonian Active Learning tab content."""
     st.markdown(
         """
-    **Thurstonian Active Learning** uses intelligent sampling to select which (ethnicity, N) 
+    **Thurstonian Active Learning** uses intelligent sampling to select which (category, N) 
     combinations to query based on model uncertainty. This can be more efficient than exhaustive 
     grid testing while still producing accurate switch points and exchange rates.
     
@@ -806,21 +836,34 @@ def render_thurstonian_testing_ui():
     # ===== CONFIGURATION SECTION =====
     st.subheader("⚙️ Test Configuration")
 
+    # Bias type selection (same as Grid testing)
+    st.markdown("**Bias Dimension**")
+    th_bias_type = st.radio(
+        "Select the type of bias to test:",
+        options=["ethnicity", "sex", "religion"],
+        format_func=lambda x: {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[x],
+        index=0,  # Default to ethnicity
+        horizontal=True,
+        help="Choose the demographic dimension for bias testing: ethnicities, sexes, or religions.",
+        key="th_bias_type",
+    )
+
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("**Ethnicities to Test**")
-        default_ethnicities = get_default_ethnicities()
-        th_selected_ethnicities = st.multiselect(
-            "Select ethnicities:",
-            options=default_ethnicities,
-            default=default_ethnicities,
-            help="Ethnicities to include in bias testing",
-            key="th_ethnicities",
+        # Get display label and default options for the selected bias type
+        th_category_label, th_default_options = get_bias_type_config(th_bias_type)
+        st.markdown(f"**{th_category_label}s to Test**")
+        th_selected_categories = st.multiselect(
+            f"Select {th_category_label.lower()}s:",
+            options=th_default_options,
+            default=th_default_options,
+            help=f"{th_category_label}s to include in bias testing",
+            key="th_categories",
         )
 
-        if not th_selected_ethnicities:
-            st.warning("Please select at least one ethnicity.")
+        if not th_selected_categories:
+            st.warning(f"Please select at least one {th_category_label.lower()}.")
             return
 
     with col2:
@@ -923,7 +966,7 @@ def render_thurstonian_testing_ui():
             min_value=5,
             max_value=100,
             value=20,
-            help="Number of (ethnicity, N) pairs to query per iteration",
+            help=f"Number of ({th_category_label}, N) pairs to query per iteration",
             key="th_queries_per_iter",
         )
 
@@ -958,16 +1001,19 @@ def render_thurstonian_testing_ui():
         )
 
     # Show estimated query count
-    total_options = len(th_selected_ethnicities) * len(th_selected_n_values)
+    total_options = len(th_selected_categories) * len(th_selected_n_values)
     grid_queries = total_options * th_K
     estimated_al_queries = (
         total_options // 3 + th_max_iterations * th_queries_per_iter
     ) * th_K
 
+    # Get category label for display
+    th_category_label = {"ethnicity": "ethnicity", "sex": "sex", "religion": "religion"}[th_bias_type]
+
     st.info(
         f"""
     **Estimated Queries:**
-    - Total options: {total_options} (ethnicity × N combinations)
+    - Total options: {total_options} ({th_category_label} × N combinations)
     - Grid testing would need: ~{grid_queries:,} queries
     - Active learning estimate: ~{estimated_al_queries:,} queries (may vary based on convergence)
     """
@@ -1027,7 +1073,8 @@ def render_thurstonian_testing_ui():
         "🧠 Run Thurstonian Active Learning Test", type="primary", key="th_run_btn"
     ):
         _run_thurstonian_test(
-            ethnicities=th_selected_ethnicities,
+            ethnicities=th_selected_categories,
+            bias_type=th_bias_type,
             n_values=th_selected_n_values,
             anchor_text=th_anchor_text,
             anchor_key=th_selected_anchor_key,
@@ -1067,6 +1114,7 @@ def _run_thurstonian_test(
     K,
     num_epochs,
     num_intermediate_per_interval,
+    bias_type,
 ):
     """Execute the Thurstonian active learning test."""
     from thurstonian_bias import (
@@ -1140,6 +1188,7 @@ def _run_thurstonian_test(
                 system_prompt=system_prompt,
                 num_ctx=num_ctx,
                 num_gpu=num_gpu,
+                bias_type=bias_type,
             )
 
             # Add observations
@@ -1222,6 +1271,7 @@ def _run_thurstonian_test(
                     system_prompt=system_prompt,
                     num_ctx=num_ctx,
                     num_gpu=num_gpu,
+                    bias_type=bias_type,
                 )
 
                 # Add observations
@@ -1275,13 +1325,15 @@ def _run_thurstonian_test(
         results_data = convert_thurstonian_to_results_format(model, anchor_text)
 
         # Create summary table
+        category_label = {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[bias_type]
         summary_table = create_summary_table(
             {
                 "switch_points": model.get_all_switch_points(),
                 "exchange_rates": model.get_exchange_rates()[0],
                 "exchange_rate_reference_category": model.get_exchange_rates()[1],
                 "refusal_rates": {},
-            }
+            },
+            category_label=category_label
         )
 
         # Prepare run payload
@@ -1294,7 +1346,8 @@ def _run_thurstonian_test(
                 "num_gpu": num_gpu,
             },
             "test_config": {
-                "ethnicities": ethnicities,
+                "bias_type": bias_type,
+                "ethnicities": ethnicities,  # Keep for backward compatibility
                 "n_values": n_values,
                 "anchor_key": anchor_key,
                 "anchor_text": anchor_text,
@@ -1367,6 +1420,7 @@ def _query_option_with_variations(
     system_prompt,
     num_ctx,
     num_gpu,
+    bias_type,
 ):
     """Query a single option with multiple anchor variations."""
     responses = []
@@ -1374,7 +1428,7 @@ def _query_option_with_variations(
     for var_idx, anchor_var in enumerate(anchor_variations):
         # Generate query
         queries_df = generate_utility_queries(
-            ethnicities=[option.ethnicity], n_values=[option.n_value], anchor=anchor_var
+            ethnicities=[option.ethnicity], n_values=[option.n_value], anchor=anchor_var, bias_type=bias_type
         )
 
         # Run query

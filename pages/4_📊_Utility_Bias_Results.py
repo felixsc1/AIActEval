@@ -6,6 +6,7 @@ Supports both Grid and Thurstonian testing methods.
 """
 
 import streamlit as st
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -43,7 +44,10 @@ def render_results_browser():
     def format_run_option(run):
         method = run.get("method", "grid")
         method_icon = "🧠" if method == "thurstonian" else "📊"
-        return f"{method_icon} {run['created_at'][:19]} - {run['model']} - {run['anchor_key']} ({run['status']})"
+        bias_type = run.get("bias_type", "ethnicity")
+        bias_emoji = {"ethnicity": "🌍", "sex": "⚥", "religion": "☪"}[bias_type]
+        bias_label = {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[bias_type]
+        return f"{method_icon} {bias_emoji} {run['created_at'][:19]} - {run['model']} - {bias_label} ({run['status']})"
 
     run_options = [format_run_option(run) for run in available_runs]
     run_ids = [run["run_id"] for run in available_runs]
@@ -108,6 +112,7 @@ def render_results_browser():
                 },
                 "config": {
                     "model": run_data["model_info"]["ollama_model"],
+                    "bias_type": run_data["test_config"].get("bias_type", "ethnicity"),
                     "ethnicities": run_data["test_config"]["ethnicities"],
                     "n_values": run_data["test_config"]["n_values"],
                     "anchor": run_data["test_config"]["anchor_text"],
@@ -167,6 +172,10 @@ def render_test_configuration_summary(config):
     """Render the test configuration summary."""
     st.subheader("⚙️ Test Configuration")
 
+    # Get category label from bias_type
+    bias_type = config.get("bias_type", "ethnicity")
+    category_label = {"ethnicity": "Ethnicities", "sex": "Sexes", "religion": "Religions"}[bias_type]
+
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -174,9 +183,9 @@ def render_test_configuration_summary(config):
         st.code(config.get("model", "Unknown"), language=None)
 
     with col2:
-        st.markdown("**Ethnicities**")
-        ethnicities = config.get("ethnicities", [])
-        st.write(", ".join(ethnicities))
+        st.markdown(f"**{category_label}**")
+        categories = config.get("ethnicities", [])
+        st.write(", ".join(categories))
 
     with col3:
         st.markdown("**System Prompt**")
@@ -321,7 +330,7 @@ def render_response_consistency_diagnostics(stats):
                             "choices",
                         ]
                     ],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
                 st.caption(
@@ -329,39 +338,39 @@ def render_response_consistency_diagnostics(stats):
                 )
 
 
-def render_detailed_statistics_table(stats):
+def render_detailed_statistics_table(stats, category_label="Ethnicity"):
     """Render the detailed statistics table."""
     st.subheader("📋 Detailed Statistics")
-    summary_df = create_summary_table(stats)
+    summary_df = create_summary_table(stats, category_label=category_label)
     st.dataframe(summary_df, width="content")
 
 
-def render_preference_switch_points_visualization(stats):
+def render_preference_switch_points_visualization(stats, category_label="Ethnicity"):
     """Render preference switch points visualization."""
     st.subheader("📊 Preference Switch Points")
     st.markdown(
-        """
-    **Interpretation:** Step functions show at what N value (number of people to save) each ethnicity
+        f"""
+    **Interpretation:** Step functions show at what N value (number of people to save) each {category_label.lower()}
     switches from preferring the anchor outcome (P = scientific advancement) to preferring to save lives (Q).
-    Each ethnicity has a binary choice (0 = P, 1 = Q) at each N value. The switch point indicates
-    implicit valuation - ethnicities with lower switch points (switch earlier) are implicitly valued more highly.
+    Each {category_label.lower()} has a binary choice (0 = P, 1 = Q) at each N value. The switch point indicates
+    implicit valuation - {category_label.lower()} with lower switch points (switch earlier) are implicitly valued more highly.
     """
     )
 
     try:
-        preference_fig = create_preference_plot(stats)
+        preference_fig = create_preference_plot(stats, category_label=category_label)
         st.pyplot(preference_fig)
     except Exception as e:
         st.warning(f"Could not generate preference plot: {e}")
 
 
-def render_exchange_rates_visualization(stats):
+def render_exchange_rates_visualization(stats, category_label="Ethnicity"):
     """Render exchange rates visualization."""
     st.subheader("⚖️ Relative Exchange Rates")
     st.markdown(
-        """
+        f"""
     **Interpretation:** Exchange rates show how much "more expensive" it is to switch the model's
-    preference for each ethnicity relative to the average. Higher values indicate the ethnicity
+    preference for each {category_label.lower()} relative to the average. Higher values indicate the {category_label.lower()}
     is implicitly valued less (requires more people to be saved to switch preference).
     """
     )
@@ -369,7 +378,7 @@ def render_exchange_rates_visualization(stats):
     exchange_rates = stats.get("exchange_rates", {})
     if exchange_rates:
         try:
-            rates_fig = create_exchange_rates_plot(stats)
+            rates_fig = create_exchange_rates_plot(stats, category_label=category_label)
             st.pyplot(rates_fig)
         except Exception as e:
             st.warning(f"Could not generate exchange rates plot: {e}")
@@ -527,7 +536,7 @@ def render_thurstonian_params(thurstonian_params):
             )
 
 
-def render_utility_surface_heatmap(thurstonian_data, config):
+def render_utility_surface_heatmap(thurstonian_data, config, category_label="Ethnicity"):
     """Render a heatmap of the fitted utility surface."""
     st.subheader("🗺️ Utility Surface")
 
@@ -537,19 +546,19 @@ def render_utility_surface_heatmap(thurstonian_data, config):
         st.info("No utility data available for visualization.")
         return
 
-    ethnicities = config.get("ethnicities", [])
+    categories = config.get("ethnicities", [])
     n_values = sorted(config.get("n_values", []))
 
-    if not ethnicities or not n_values:
+    if not categories or not n_values:
         st.info("Insufficient configuration data for utility surface.")
         return
 
     # Build utility matrix
     utility_matrix = []
-    for ethnicity in ethnicities:
+    for category in categories:
         row = []
         for n_value in n_values:
-            option_id = f"{ethnicity}_{n_value}"
+            option_id = f"{category}_{n_value}"
             util = utilities.get(option_id, {})
             mean = util.get("mean", 0)
             row.append(mean)
@@ -565,11 +574,11 @@ def render_utility_surface_heatmap(thurstonian_data, config):
     # Set ticks
     ax.set_xticks(range(len(n_values)))
     ax.set_xticklabels([f"{n:,.0f}" for n in n_values], rotation=45, ha="right")
-    ax.set_yticks(range(len(ethnicities)))
-    ax.set_yticklabels(ethnicities)
+    ax.set_yticks(range(len(categories)))
+    ax.set_yticklabels(categories)
 
     ax.set_xlabel("N (Number of People to Save)")
-    ax.set_ylabel("Ethnicity")
+    ax.set_ylabel(category_label)
     ax.set_title("Thurstonian Utility Surface (Mean Utility)")
 
     # Add colorbar
@@ -581,9 +590,9 @@ def render_utility_surface_heatmap(thurstonian_data, config):
     plt.close()
 
     st.caption(
-        """
+        f"""
     **Interpretation:** Higher utility (green) means stronger preference for saving lives over the anchor.
-    The switch point for each ethnicity occurs where utility crosses ~0 (the anchor's utility).
+    The switch point for each {category_label.lower()} occurs where utility crosses ~0 (the anchor's utility).
     """
     )
 
@@ -604,6 +613,10 @@ def main():
     stats = results["stats"]
     config = results["config"]
     method = results.get("method", "grid")
+
+    # Get category label from bias_type
+    bias_type = config.get("bias_type", "ethnicity")
+    category_label = {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[bias_type]
 
     # Surface any non-fatal warnings while still showing the results
     status_value = stats.get("status")
@@ -644,14 +657,14 @@ def main():
 
     # Show Thurstonian utility surface (only for Thurstonian results)
     if method == "thurstonian" and "thurstonian" in results:
-        render_utility_surface_heatmap(results["thurstonian"], config)
+        render_utility_surface_heatmap(results["thurstonian"], config, category_label=category_label)
 
     # Show detailed statistics table
-    render_detailed_statistics_table(stats)
+    render_detailed_statistics_table(stats, category_label=category_label)
 
     # Show visualizations
-    render_preference_switch_points_visualization(stats)
-    render_exchange_rates_visualization(stats)
+    render_preference_switch_points_visualization(stats, category_label=category_label)
+    render_exchange_rates_visualization(stats, category_label=category_label)
 
     # Show data export
     render_data_export_section(results)

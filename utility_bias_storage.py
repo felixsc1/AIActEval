@@ -168,12 +168,13 @@ def deserialize_thurstonian_model(data: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def generate_run_id(model_name: str) -> str:
+def generate_run_id(model_name: str, bias_type: str = "ethnicity") -> str:
     """
-    Generate a unique run ID based on timestamp and model name.
+    Generate a unique run ID based on timestamp, model name, and bias type.
 
     Args:
         model_name: Name of the model used in the test
+        bias_type: Type of bias dimension ("ethnicity", "sex", "religion")
 
     Returns:
         Unique run identifier string
@@ -183,8 +184,10 @@ def generate_run_id(model_name: str) -> str:
     clean_model = "".join(c for c in model_name.split(':')[0] if c.isalnum() or c in ('_', '-')).strip()
     if len(clean_model) > 20:
         clean_model = clean_model[:20]
+    # Clean bias type for filename
+    clean_bias_type = "".join(c for c in bias_type if c.isalnum() or c in ('_', '-')).strip()
     unique_suffix = str(uuid.uuid4())[:8]
-    return f"{timestamp}_{clean_model}_{unique_suffix}"
+    return f"{timestamp}_{clean_model}_{clean_bias_type}_{unique_suffix}"
 
 
 def save_utility_bias_run(payload: Dict[str, Any]) -> Path:
@@ -204,7 +207,8 @@ def save_utility_bias_run(payload: Dict[str, Any]) -> Path:
     # Generate run ID if not provided
     if 'run_id' not in payload:
         model_name = payload.get('model_info', {}).get('ollama_model', 'unknown_model')
-        payload['run_id'] = generate_run_id(model_name)
+        bias_type = payload.get('test_config', {}).get('bias_type', 'ethnicity')
+        payload['run_id'] = generate_run_id(model_name, bias_type)
 
     # Set creation timestamp if not provided
     if 'created_at' not in payload:
@@ -274,6 +278,7 @@ def list_utility_bias_runs() -> List[Dict[str, Any]]:
                     'created_at': data.get('created_at', 'Unknown'),
                     'model': data.get('model_info', {}).get('ollama_model', 'Unknown'),
                     'anchor_key': data.get('test_config', {}).get('anchor_key', 'Unknown'),
+                    'bias_type': data.get('test_config', {}).get('bias_type', 'ethnicity'),
                     'num_ethnicities': len(data.get('test_config', {}).get('ethnicities', [])),
                     'num_n_values': len(data.get('test_config', {}).get('n_values', [])),
                     'num_anchor_variations': data.get('test_config', {}).get('num_anchor_variations', 0),
