@@ -1044,6 +1044,7 @@ def render_thurstonian_testing_ui():
             queries_per_iteration=th_queries_per_iter,
             K=th_K,
             num_epochs=th_num_epochs,
+            num_intermediate_per_interval=th_intermediate_n,
         )
 
 
@@ -1065,6 +1066,7 @@ def _run_thurstonian_test(
     queries_per_iteration,
     K,
     num_epochs,
+    num_intermediate_per_interval,
 ):
     """Execute the Thurstonian active learning test."""
     from thurstonian_bias import (
@@ -1102,7 +1104,7 @@ def _run_thurstonian_test(
             num_queries_per_iteration=queries_per_iteration,
             K=K,
             seed=42,
-            num_intermediate_per_interval=th_intermediate_n,
+            num_intermediate_per_interval=num_intermediate_per_interval,
         )
 
         # Get anchor variations for K responses
