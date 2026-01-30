@@ -16,7 +16,7 @@ Key features:
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter, FuncFormatter
+from matplotlib.ticker import ScalarFormatter, FuncFormatter, LogLocator
 from scipy.optimize import curve_fit
 from typing import List, Dict, Any, Optional, Tuple
 import ollama
@@ -2326,9 +2326,22 @@ def create_preference_plot(stats: Dict[str, Any]) -> plt.Figure:
     return fig
 
 
+def _log_axis_label(value: float) -> str:
+    """Format y-axis label for log scale: normal numbers for small values, 10^n for large."""
+    if value <= 0:
+        return "0"
+    if value < 10000:
+        if value >= 1:
+            return str(int(value)) if value == int(value) else f"{value:.1f}"
+        return f"{value:.2g}".rstrip("0").rstrip(".")
+    exp = int(round(np.log10(value)))
+    return f"$10^{{{exp}}}$"
+
+
 def create_exchange_rates_plot(stats: Dict[str, Any]) -> plt.Figure:
     """
-    Create exchange rates bar chart.
+    Create exchange rates bar chart with logarithmic y-axis.
+    Reference = 1 (10^0). Bars > 1 point upward (blue), bars < 1 point downward (red).
 
     Args:
         stats: Statistics dict from compute_statistics
@@ -2354,52 +2367,104 @@ def create_exchange_rates_plot(stats: Dict[str, Any]) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(12, 6))
 
     ethnicities = list(exchange_rates.keys())
-    rates = list(exchange_rates.values())
+    # Use 1.0 for reference category (stored as 0) so log scale and bars are correct
+    rates = [
+        1.0 if (eth == ref_category and r == 0.0) else r
+        for eth, r in zip(ethnicities, exchange_rates.values())
+    ]
 
-    # Color reference category differently
-    colors = ["gray" if eth == ref_category else "skyblue" for eth in ethnicities]
-    bars = ax.bar(ethnicities, rates, color=colors, alpha=0.8)
+    # Log scale: reference at 1. Bars > 1 from 1 upward (blue), bars < 1 from value to 1 downward (red)
+    ax.set_yscale("log")
+    all_positive = [r for r in rates if r > 0]
+    y_min = min(all_positive) * 0.5 if all_positive else 0.1
+    y_max = max(rates) * 2 if rates else 100
+    y_min = max(y_min, 0.01)
+    ax.set_ylim(y_min, y_max)
 
-    ax.set_xlabel("Ethnicity")
-    ax.set_ylabel("Relative Exchange Rate")
-    ax.set_title(
-        f'Relative Exchange Rates\n(Reference: {ref_category if ref_category else "N/A"} = 0)'
-    )
-    ax.grid(True, alpha=0.3, axis="y")
-    ax.axhline(y=0, color="black", linestyle="-", linewidth=1)
+    # Reference line at 1
+    ax.axhline(y=1, color="black", linestyle="-", linewidth=1, zorder=1)
 
-    # Format y-axis to avoid scientific notation
-    y_formatter = ScalarFormatter(useOffset=False)
-    y_formatter.set_scientific(False)
-    ax.yaxis.set_major_formatter(y_formatter)
+    x = np.arange(len(ethnicities))
+    width = 0.6
 
-    # Add value labels on bars showing multiple of reference category
-    for bar, rate, ethnicity in zip(bars, rates, ethnicities):
-        height = bar.get_height()
-        if ethnicity == ref_category:
-            # Reference category - show as reference (rate = 0)
-            label_text = "Reference (0)"
-            va_position = "bottom"
-            y_offset = 0.02
+    # Split into above-reference (>= 1) and below-reference (< 1)
+    above_x, above_bottom, above_height = [], [], []
+    below_x, below_bottom, below_height = [], [], []
+    ref_x = None
+
+    for i, (eth, rate) in enumerate(zip(ethnicities, rates)):
+        if eth == ref_category and rate == 1.0:
+            ref_x = i
+            continue
+        if rate >= 1:
+            above_x.append(i)
+            above_bottom.append(1)
+            above_height.append(rate - 1)
         else:
-            # Show as multiple of reference: "3x Black" or "0.5x Black"
-            if rate >= 1:
-                # Format large numbers nicely using readable format
-                if rate >= 100:
-                    # For very large rates, use readable format
-                    rate_str = format_number_readable(rate)
-                    label_text = f"{rate_str}x {ref_category}"
-                else:
-                    label_text = f"{rate:.2f}x {ref_category}"
-            else:
-                # For rates < 1, show as fraction (e.g., 0.5x means half the switch point)
-                label_text = f"{rate:.2f}x {ref_category}"
-            va_position = "bottom" if height >= 0 else "top"
-            y_offset = 0.02 if height >= 0 else -0.12
+            below_x.append(i)
+            below_bottom.append(rate)
+            below_height.append(1 - rate)
 
+    if above_x:
+        ax.bar(
+            np.array(above_x),
+            np.array(above_height),
+            width,
+            bottom=np.array(above_bottom),
+            color="skyblue",
+            alpha=0.8,
+            zorder=2,
+        )
+    if below_x:
+        ax.bar(
+            np.array(below_x),
+            np.array(below_height),
+            width,
+            bottom=np.array(below_bottom),
+            color="red",
+            alpha=0.8,
+            zorder=2,
+        )
+    if ref_x is not None:
+        ax.bar(ref_x, 0.1, width, bottom=1.0, color="gray", alpha=0.6, zorder=2)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(ethnicities)
+    ax.set_xlabel("Ethnicity")
+    ax.set_ylabel("Relative Exchange Rate (log scale)")
+    ax.set_title(
+        f'Relative Exchange Rates (log scale)\n(Reference: {ref_category if ref_category else "N/A"} = 1)'
+    )
+    ax.grid(True, alpha=0.3, axis="y", which="both")
+
+    # Y-axis: normal numbers 0.1, 1, 10, 100; use 10^n for very large
+    ax.yaxis.set_major_locator(LogLocator(base=10.0, numticks=15))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: _log_axis_label(v)))
+
+    # Value labels on bars
+    for i, (eth, rate) in enumerate(zip(ethnicities, rates)):
+        if eth == ref_category and rate == 1.0:
+            label_text = "Reference (1)"
+            y_pos = 1.0
+            va_position = "bottom"
+            y_offset = 1.15
+        else:
+            if rate >= 100:
+                rate_str = format_number_readable(rate)
+                label_text = f"{rate_str}x {ref_category}"
+            else:
+                label_text = f"{rate:.2f}x {ref_category}"
+            if rate >= 1:
+                y_pos = rate
+                va_position = "bottom"
+                y_offset = 1.08
+            else:
+                y_pos = rate
+                va_position = "top"
+                y_offset = 0.92
         ax.text(
-            bar.get_x() + bar.get_width() / 2.0,
-            height + y_offset,
+            i + width / 2.0,
+            y_pos * y_offset,
             label_text,
             ha="center",
             va=va_position,
@@ -2443,7 +2508,7 @@ def create_summary_table(stats: Dict[str, Any]) -> pd.DataFrame:
             # No switch point means no exchange rate
             rate_str = "N/A (no switch)"
         elif ethnicity == ref_category:
-            rate_str = "0 (Reference)"
+            rate_str = "1 (Reference)"
         elif ethnicity in exchange_rates and ref_category:
             rate = exchange_rates[ethnicity]
             rate_str = f"{rate:.2f}x {ref_category}"
