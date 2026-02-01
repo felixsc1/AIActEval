@@ -85,6 +85,30 @@ Judge model costs (per 1M tokens):
 - GPT-5-mini: $0.25 input / $2.00 output (recommended default)
 - GPT-5.2: $1.75 input / $14.00 output
 
+## Running tests
+
+Basic pytest tests are provided for the Utility Bias Testing and Utility Bias Results pages. They check that the pages render without showing error/exception boxes (catching regressions that don’t raise Python exceptions), and that one Thurstonian-style preference query runs correctly with a **mocked** API response (no real API calls or costs).
+
+1. Install dependencies (including pytest):
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. Run the tests from the project root:
+
+   ```bash
+   pytest tests/ -v
+   ```
+
+   To run only the utility-bias page tests:
+
+   ```bash
+   pytest tests/test_utility_bias_pages.py -v
+   ```
+
+   The Thurstonian one-query test mocks `utility_bias.call_groq_api`, so it verifies request/response logic without using the Groq API.
+
 ## Extensibility
 
 Easy to add new metrics (Toxicity, Hallucination, etc.) by updating `config.py` and extending the evaluation logic.
