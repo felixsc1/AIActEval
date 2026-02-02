@@ -118,16 +118,30 @@ def get_model_results_path(model_key: str) -> Path:
 
 
 def load_existing_results(model_key: str) -> Optional[Dict[str, Any]]:
-    """Load existing evaluation results for a model."""
+    """Load existing evaluation results for a model.
+    
+    DeepTeam saves results as timestamped JSON files (e.g., 20260202_092347.json).
+    This function finds the most recent one by sorting filenames chronologically.
+    """
     results_path = get_model_results_path(model_key)
-    overview_file = results_path / "overview.json"
-    if overview_file.exists():
-        try:
-            with open(overview_file, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            st.warning(f"Could not load existing results: {e}")
-    return None
+    if not results_path.exists():
+        return None
+    
+    # Find all JSON files in the results directory (excluding any non-timestamped files)
+    json_files = sorted(results_path.glob("*.json"))
+    
+    if not json_files:
+        return None
+    
+    # Take the most recent file (last in sorted order since YYYYMMDD_HHMMSS sorts chronologically)
+    most_recent = json_files[-1]
+    
+    try:
+        with open(most_recent, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        st.warning(f"Could not load existing results from {most_recent.name}: {e}")
+        return None
 
 
 def create_model_callback(model_key: str, async_mode: bool = False):
@@ -267,9 +281,10 @@ def run_evaluation(
     vulnerabilities: List,
     attacks_per_type: int = 3,
     async_mode: bool = True,
-    reuse_attacks: bool = True
 ):
     """Run red teaming evaluation."""
+    import traceback
+    
     try:
         # Create model callback (async when async_mode=True)
         callback = create_model_callback(model_key, async_mode=async_mode)
@@ -280,17 +295,6 @@ def run_evaluation(
             evaluation_model=judge_model,
             async_mode=async_mode,
         )
-
-        # Check for existing results if reuse_attacks is enabled
-        existing_results = None
-        if reuse_attacks:
-            existing_results = load_existing_results(model_key)
-            if existing_results:
-                st.info(f"Found existing results for {model_key}, will reuse previous attacks where possible")
-            else:
-                # DeepTeam can only reuse simulated test cases if we actually have previous ones to reuse.
-                # If none are found, disable reuse to avoid DeepTeam attempting to access missing state.
-                st.info(f"No existing results found for {model_key}; disabling reuse for this run.")
 
         # Define attack methods for generating adversarial inputs
         # Ordered by general effectiveness - DeepTeam randomly samples from this list
@@ -305,25 +309,31 @@ def run_evaluation(
             Multilingual(),     # Tests non-English handling
         ]
 
+        print(f"[DeepTeam] Starting red team evaluation...")
+        
         # Run evaluation
+        # Note: reuse_simulated_test_cases only works within the same RedTeamer instance,
+        # not across separate runs. We always run fresh evaluations.
         risk_assessment = red_teamer.red_team(
             model_callback=callback,
             vulnerabilities=vulnerabilities,
             attacks=attacks,
             attacks_per_vulnerability_type=attacks_per_type,
-            reuse_simulated_test_cases=bool(existing_results) if reuse_attacks else False,
         )
 
         # Save results
         results_path = get_model_results_path(model_key)
         results_path.mkdir(parents=True, exist_ok=True)
         risk_assessment.save(to=str(results_path))
-
+        
+        print(f"[DeepTeam] Evaluation completed successfully")
         return risk_assessment
 
     except Exception as e:
-        st.error(f"Evaluation failed: {e}")
-        return None
+        # Print full traceback to console for debugging
+        print(f"[DeepTeam] ERROR: Evaluation failed with exception:")
+        traceback.print_exc()
+        raise  # Re-raise so it's captured by the thread error handler
 
 
 def main():
@@ -378,8 +388,14 @@ def main():
             async_mode = st.checkbox("Async Mode", value=True, help="Enable concurrent execution")
             attacks_per_type = st.slider("Attacks per Vulnerability Type", 1, 10, 3,
                                        help="Number of different attacks to try for each vulnerability type")
-            reuse_attacks = st.checkbox("Reuse Previous Attacks", value=True,
-                                      help="Skip attacks that were already performed previously")
+            
+            # Check for existing results and show info
+            existing_results = load_existing_results(selected_model_key) if selected_model_key else None
+            if existing_results:
+                results_path = get_model_results_path(selected_model_key)
+                json_files = sorted(results_path.glob("*.json"))
+                latest_file = json_files[-1].name if json_files else "unknown"
+                st.info(f"📊 Previous results exist: `{latest_file}`")
 
         st.header("Vulnerability Tests")
 
@@ -457,6 +473,7 @@ def main():
         result_container = {"result": None, "error": None}
 
         def run_in_thread():
+            import traceback
             # Don't redirect stdout/stderr - let DeepTeam output directly to terminal
             try:
                 result_container["result"] = run_evaluation(
@@ -465,10 +482,12 @@ def main():
                     vulnerabilities=vulnerabilities,
                     attacks_per_type=attacks_per_type,
                     async_mode=async_mode,
-                    reuse_attacks=reuse_attacks
                 )
             except Exception as e:
-                result_container["error"] = str(e)
+                # Capture full traceback for better error reporting
+                tb = traceback.format_exc()
+                result_container["error"] = f"{e}\n\nFull traceback:\n{tb}"
+                print(f"[DeepTeam Thread] Exception caught: {tb}")
 
         # Start evaluation in background thread
         eval_thread = threading.Thread(target=run_in_thread)
