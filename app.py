@@ -15,7 +15,7 @@ from dataset_handler import load_dataset
 
 # Page configuration - must be first Streamlit command
 st.set_page_config(
-    page_title="ProbeAI - EU AI Act Compliance Testing",
+    page_title="SafeEval - EU AI Act Compliance Testing",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -23,8 +23,7 @@ st.set_page_config(
 
 # Define pages using programmatic navigation API
 pages = [
-    st.Page("pages/1_📝_Dataset_Management.py", title="Dataset Management", icon="📝"),
-    st.Page("pages/2_🧪_Test_Runner.py", title="Test Runner", icon="🧪"),
+    st.Page("pages/1_🔴_Evaluations.py", title="Evaluations", icon="🔴"),
     st.Page("pages/3_⚖️_Utility_Bias_Testing.py", title="Utility Bias Testing", icon="⚖️"),
     st.Page("pages/4_📊_Utility_Bias_Results.py", title="Utility Bias Results", icon="📊"),
 ]

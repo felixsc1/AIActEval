@@ -1,5 +1,4 @@
 streamlit>=1.40.0
-deepeval==3.7.9
 ollama>=0.4.0
 python-dotenv>=1.0.0
 pandas>=2.0.0
@@ -10,3 +9,4 @@ networkx>=3.0
 numpy>=1.24.0
 pytest>=7.0.0
 pytest-mock>=3.10.0
+deepteam
