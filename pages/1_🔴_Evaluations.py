@@ -5,14 +5,22 @@ Allows users to configure and run red teaming evaluations using DeepTeam
 against various LLM models with different vulnerability tests.
 """
 
-import asyncio
-import io
-import streamlit as st
 import os
 import sys
+
+# Force unbuffered output so DeepTeam progress appears in console immediately
+os.environ["PYTHONUNBUFFERED"] = "1"
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(line_buffering=True)
+
+import asyncio
+import streamlit as st
+import time
+import threading
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from contextlib import contextmanager
 import json
 
 # Import model utilities
@@ -101,21 +109,6 @@ VULNERABILITY_INFO = {
         }
     }
 }
-
-
-@contextmanager
-def capture_console_output():
-    """Redirect stdout and stderr to buffers; yield (stdout_buf, stderr_buf)."""
-    stdout_buf = io.StringIO()
-    stderr_buf = io.StringIO()
-    old_stdout, old_stderr = sys.stdout, sys.stderr
-    try:
-        sys.stdout = stdout_buf
-        sys.stderr = stderr_buf
-        yield stdout_buf, stderr_buf
-    finally:
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
 
 
 def get_model_results_path(model_key: str) -> Path:
@@ -451,10 +444,22 @@ def main():
         if toxicity_types:
             vulnerabilities.append(Toxicity(types=toxicity_types))
 
-        # Run evaluation and capture console output (progress bars, summaries from DeepTeam)
-        with st.status("🔴 Running red team evaluation...", expanded=True) as status:
-            with capture_console_output() as (stdout_buf, stderr_buf):
-                result = run_evaluation(
+        # Calculate estimated test count for info display
+        num_vuln_types = len(pii_types) + len(bias_types) + len(toxicity_types)
+        estimated_tests = num_vuln_types * attacks_per_type
+
+        # Show info and progress bar
+        st.info(f"🔴 Running {estimated_tests} tests ({num_vuln_types} vulnerability types × {attacks_per_type} attacks). Watch your terminal for DeepTeam progress.")
+        progress_bar = st.progress(0, text="Starting evaluation...")
+        status_text = st.empty()
+
+        # Container for thread result
+        result_container = {"result": None, "error": None}
+
+        def run_in_thread():
+            # Don't redirect stdout/stderr - let DeepTeam output directly to terminal
+            try:
+                result_container["result"] = run_evaluation(
                     model_key=selected_model_key,
                     judge_model=selected_judge,
                     vulnerabilities=vulnerabilities,
@@ -462,25 +467,42 @@ def main():
                     async_mode=async_mode,
                     reuse_attacks=reuse_attacks
                 )
+            except Exception as e:
+                result_container["error"] = str(e)
 
-            # Show captured console output (progress bars, DeepTeam summaries)
-            console_out = stdout_buf.getvalue().strip()
-            console_err = stderr_buf.getvalue().strip()
-            if console_out or console_err:
-                with st.expander("📟 Console output", expanded=True):
-                    combined = (console_out + "\n" + console_err).strip() if (console_out and console_err) else (console_out or console_err)
-                    st.code(combined, language=None)
+        # Start evaluation in background thread
+        eval_thread = threading.Thread(target=run_in_thread)
+        eval_thread.start()
 
-            if result:
-                status.update(label="✅ Evaluation completed successfully!", state="complete")
-                st.session_state.evaluation_results = result
+        # Update progress bar while evaluation runs
+        start_time = time.time()
+        while eval_thread.is_alive():
+            elapsed = time.time() - start_time
+            # Progress that approaches 95% asymptotically (reaches ~50% at 30s, ~75% at 90s)
+            progress = min(0.95, 1 - (1 / (1 + elapsed / 30)))
+            progress_bar.progress(progress, text=f"Running evaluation... ({elapsed:.0f}s elapsed)")
+            status_text.caption("💡 DeepTeam progress is shown in your terminal")
+            time.sleep(0.5)
 
-                st.success("🎉 Red teaming evaluation completed!")
-                display_evaluation_results(result, selected_model_key)
+        eval_thread.join()
 
-            else:
-                status.update(label="❌ Evaluation failed", state="error")
-                st.error("The evaluation could not be completed. Please check the console output above for details.")
+        # Get results
+        result = result_container["result"]
+        error = result_container["error"]
+
+        if error:
+            progress_bar.progress(1.0, text="❌ Evaluation failed")
+            st.error(f"Evaluation failed: {error}")
+        elif result:
+            progress_bar.progress(1.0, text="✅ Evaluation completed!")
+            status_text.empty()
+            st.session_state.evaluation_results = result
+            st.success("🎉 Red teaming evaluation completed!")
+            display_evaluation_results(result, selected_model_key)
+        else:
+            progress_bar.progress(1.0, text="❌ Evaluation failed")
+            status_text.empty()
+            st.error("The evaluation could not be completed. Check your terminal for details.")
 
     # Show existing results if available
     if st.session_state.evaluation_results:
