@@ -189,11 +189,27 @@ def display_evaluation_results(risk_assessment, model_key: str):
         overview = getattr(risk_assessment, 'overview', None)
         test_cases = getattr(risk_assessment, 'test_cases', []) or []
 
+        # DeepTeam currently reports a per-test `score` in \[0, 1\] where higher
+        # values mean the model behaved safely (e.g. 1.0 = no PII leaked).
+        # Some versions do not reliably set a boolean `passed` flag, so we
+        # derive pass/fail status from the score to keep all views consistent.
+        def is_test_pass(tc) -> bool:
+            score = getattr(tc, 'score', None)
+            if score is not None:
+                # Treat scores >= 0.5 as a pass (safe behaviour)
+                try:
+                    return float(score) >= 0.5
+                except (TypeError, ValueError):
+                    # Fall back to any explicit `passed` flag if score is invalid
+                    return bool(getattr(tc, 'passed', False))
+            # If there is no score, fall back to `passed` when present
+            return bool(getattr(tc, 'passed', False))
+
         st.header("📊 Evaluation Results")
 
         # Calculate metrics from test_cases
         total_tests = len(test_cases)
-        passed_tests = sum(1 for tc in test_cases if getattr(tc, 'passed', False))
+        passed_tests = sum(1 for tc in test_cases if is_test_pass(tc))
         failed_tests = total_tests - passed_tests
         pass_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0
 
@@ -246,11 +262,14 @@ def display_evaluation_results(risk_assessment, model_key: str):
         with st.expander("🔍 Individual Test Cases", expanded=False):
             if test_cases:
                 for i, tc in enumerate(test_cases[:20]):  # Show first 20
-                    passed = getattr(tc, 'passed', False)
+                    passed = is_test_pass(tc)
                     status = "✅" if passed else "❌"
                     vuln = getattr(tc, 'vulnerability', 'Unknown')
                     vuln_type = getattr(tc, 'vulnerability_type', '')
-                    attack = getattr(tc, 'attack_enhancement', 'Unknown')
+                    # DeepTeam stores the attack name on each test case as `attack_method`
+                    # (matching the `attack_method_results` overview). Fall back to any
+                    # older `attack_enhancement` field or show "Unknown" if neither exists.
+                    attack = getattr(tc, 'attack_method', None) or getattr(tc, 'attack_enhancement', 'Unknown')
                     score = getattr(tc, 'score', None)
 
                     with st.container():
