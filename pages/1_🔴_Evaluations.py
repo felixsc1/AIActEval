@@ -356,11 +356,10 @@ def run_evaluation(
 
 
 def main():
-    st.title("🔴 Evaluations - DeepTeam Red Teaming")
+    st.title("🔴 Evaluations")
 
     st.markdown("""
-    Configure and run red teaming evaluations to test your LLM models for safety vulnerabilities
-    using DeepTeam's comprehensive testing framework.
+    Configure and run red teaming evaluations to test your LLM models for EU AI Act compliance.
     """)
 
     # Check for existing results
@@ -541,11 +540,6 @@ def main():
             progress_bar.progress(1.0, text="❌ Evaluation failed")
             status_text.empty()
             st.error("The evaluation could not be completed. Check your terminal for details.")
-
-    # Show existing results if available
-    if st.session_state.evaluation_results:
-        st.header("📊 Current Results")
-        # TODO: Display more detailed results here
 
 
 if __name__ == "__main__":
