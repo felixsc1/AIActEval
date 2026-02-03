@@ -60,23 +60,27 @@ def render_results_browser():
         selected_filepath = run_ids[selected_run_idx]
         selected_run_info = available_runs[selected_run_idx]
 
+        # Load the full run data first to get duration
+        try:
+            run_data = load_evaluation_run(selected_filepath)
+        except Exception as e:
+            st.error(f"Failed to load run data: {e}")
+            return None
+
         # Show basic run info
+        overview = run_data.get("overview", {})
+        run_duration = overview.get("run_duration", 0)
+        duration_value = f"{run_duration:.1f}s" if run_duration else "N/A"
+        
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Model Evaluated", selected_run_info["model_key"])
         with col2:
             st.metric("Date/Time", format_datetime_for_display(selected_run_info["created_at"]))
         with col3:
-            st.metric("Total Tests", selected_run_info["total_test_cases"])
+            st.metric("Duration", duration_value)
 
-        # Load the full run data
-        try:
-            run_data = load_evaluation_run(selected_filepath)
-            return run_data
-
-        except Exception as e:
-            st.error(f"Failed to load run data: {e}")
-            return None
+        return run_data
 
     return None
 
@@ -96,32 +100,26 @@ def render_summary_statistics(run_data: Dict[str, Any]):
     # Judge model
     judge_model = run_data.get("judge_model", "Not recorded")
 
-    # Duration
-    run_duration = overview.get("run_duration", 0)
-
     # Vulnerabilities covered
     vuln_results = overview.get("vulnerability_type_results", [])
     vulnerabilities_covered = len(vuln_results)
 
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    # Use relative column widths; make col1 (Judge Model) larger to fit long keys
+    col1, col2, col3, col4, col5 = st.columns([2.5, 1, 1, 1, 1])
 
     with col1:
         st.metric("Judge Model", judge_model)
 
     with col2:
-        duration_value = f"{run_duration:.1f}s" if run_duration else "N/A"
-        st.metric("Duration", duration_value)
+        st.metric("Total Tests", total_tests)
 
     with col3:
-        st.metric("Total Attacks", total_tests)
-
-    with col4:
         st.metric("Pass Rate", f"{pass_rate:.1f}%")
 
-    with col5:
+    with col4:
         st.metric("Vulnerabilities Covered", vulnerabilities_covered)
 
-    with col6:
+    with col5:
         failed_tests = total_tests - passed_tests
         st.metric("Failed Tests", failed_tests)
 
