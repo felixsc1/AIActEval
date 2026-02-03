@@ -344,7 +344,28 @@ def run_evaluation(
         results_path = get_model_results_path(model_key)
         results_path.mkdir(parents=True, exist_ok=True)
         risk_assessment.save(to=str(results_path))
-        
+
+        # Post-process the saved JSON to add judge_model and other metadata
+        try:
+            json_files = sorted(results_path.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+            if json_files:
+                latest_file = json_files[0]
+                with open(latest_file, 'r') as f:
+                    data = json.load(f)
+
+                # Add metadata
+                data["judge_model"] = judge_model
+                data["model_key"] = model_key
+                data["run_timestamp"] = time.time()
+
+                # Write back
+                with open(latest_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+
+                print(f"[DeepTeam] Added metadata to {latest_file.name}")
+        except Exception as e:
+            print(f"[DeepTeam] Warning: Could not add metadata to saved results: {e}")
+
         print(f"[DeepTeam] Evaluation completed successfully")
         return risk_assessment
 

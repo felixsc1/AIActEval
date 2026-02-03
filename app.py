@@ -24,6 +24,7 @@ st.set_page_config(
 # Define pages using programmatic navigation API
 pages = [
     st.Page("pages/1_🔴_Evaluations.py", title="Evaluations", icon="🔴"),
+    st.Page("pages/2_📋_Evaluation_Results.py", title="Evaluation Results", icon="📋"),
     st.Page("pages/3_⚖️_Utility_Bias_Testing.py", title="Utility Bias Testing", icon="⚖️"),
     st.Page("pages/4_📊_Utility_Bias_Results.py", title="Utility Bias Results", icon="📊"),
 ]
