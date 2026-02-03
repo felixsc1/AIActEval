@@ -268,6 +268,7 @@ def call_groq_api(
     temperature: float = 0.0,
     max_tokens: int = 1024,
     max_retries: int = 3,
+    response_format: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Call Groq API with rate limiting and automatic retry on rate limit errors.
@@ -278,6 +279,7 @@ def call_groq_api(
         temperature: Response randomness
         max_tokens: Maximum tokens to generate
         max_retries: Maximum number of retries on rate limit errors
+        response_format: Optional response format dict (e.g., {"type": "json_object"} for JSON mode)
 
     Returns:
         API response dict
@@ -302,6 +304,10 @@ def call_groq_api(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    
+    # Add response_format if provided (for JSON mode)
+    if response_format:
+        payload["response_format"] = response_format
 
     for attempt in range(max_retries):
         # Wait for rate limits before each attempt
