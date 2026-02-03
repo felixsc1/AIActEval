@@ -109,13 +109,14 @@ def render_summary_statistics(run_data: Dict[str, Any]):
         st.metric("Judge Model", judge_model)
 
     with col2:
-        st.metric("Duration", ".1f")
+        duration_value = f"{run_duration:.1f}s" if run_duration else "N/A"
+        st.metric("Duration", duration_value)
 
     with col3:
         st.metric("Total Attacks", total_tests)
 
     with col4:
-        st.metric("Pass Rate", ".1f")
+        st.metric("Pass Rate", f"{pass_rate:.1f}%")
 
     with col5:
         st.metric("Vulnerabilities Covered", vulnerabilities_covered)
