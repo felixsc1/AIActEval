@@ -163,19 +163,14 @@ def create_vulnerability_radar_chart(run_data: Dict[str, Any]):
     # Create radar chart
     fig = go.Figure()
 
-    # Color based on pass rate thresholds
-    colors = []
-    for rate in pass_rates:
-        if rate < 70:
-            colors.append('red')
-        elif rate < 90:
-            colors.append('orange')
-        else:
-            colors.append('green')
+    # Close the polygon by connecting last point to first
+    # Duplicate first category and pass_rate at the end
+    closed_categories = categories + [categories[0]]
+    closed_pass_rates = pass_rates + [pass_rates[0]]
 
     fig.add_trace(go.Scatterpolar(
-        r=pass_rates,
-        theta=categories,
+        r=closed_pass_rates,
+        theta=closed_categories,
         fill='toself',
         name='Pass Rate (%)',
         line_color='blue',
@@ -217,8 +212,7 @@ def render_vulnerability_radar_chart(run_data: Dict[str, Any]):
 
     st.caption("""
     **Interpretation:** Each axis represents a vulnerability category. The distance from center indicates pass rate percentage.
-    Higher values (outer areas) show better security performance. Green indicates strong performance (≥90% pass rate),
-    orange shows moderate performance (70-89%), and red indicates areas needing attention (<70%).
+    Higher values (outer areas) show better security performance. Performance thresholds: ≥90% (strong), 70-89% (moderate), <70% (needs attention).
     """)
 
 
