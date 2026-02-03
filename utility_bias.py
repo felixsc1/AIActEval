@@ -394,10 +394,14 @@ def get_all_available_models() -> Dict[str, str]:
                 name = getattr(model, "model", None) or getattr(model, "name", None)
 
             if name:
-                # Format display name for Ollama models
-                display_name = (
-                    name.split(":")[0].replace("-", " ").replace("_", " ").title()
-                )
+                # Format display name for Ollama models, preserving parameter suffixes
+                base, *suffix_parts = name.split(":")
+                base_display = base.replace("-", " ").replace("_", " ").title()
+                if suffix_parts:
+                    suffix = ":".join(suffix_parts)
+                    display_name = f"{base_display}:{suffix}"
+                else:
+                    display_name = base_display
                 all_models[f"ollama/{name}"] = f"Ollama: {display_name}"
     except Exception as e:
         print(f"Warning: Could not fetch Ollama models: {e}")

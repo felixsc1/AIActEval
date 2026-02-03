@@ -44,12 +44,10 @@ from deepteam.attacks.single_turn import (
     Multilingual,     # Tests language handling
 )
 
-# OpenAI judge models for DeepTeam (use actual OpenAI model names)
+# OpenAI judge models for DeepTeam (updated to current models)
 OPENAI_JUDGE_MODELS = {
-    "gpt-4o": "OpenAI: GPT-4o (Most Capable)",
-    "gpt-4o-mini": "OpenAI: GPT-4o Mini (Balanced)",
-    "gpt-4-turbo": "OpenAI: GPT-4 Turbo",
-    "gpt-3.5-turbo": "OpenAI: GPT-3.5 Turbo (Cheapest)",
+    "gpt-5.2": "OpenAI: GPT-5.2 (Most Capable)",
+    "gpt-5-mini": "OpenAI: GPT-5 Mini (Balanced)",
 }
 
 # Vulnerability type descriptions and examples
@@ -414,7 +412,17 @@ def main():
             st.subheader("Evaluation Configuration")
 
             # Judge model selection
+            # Start with OpenAI judge models (GPT-5 family), then append all locally
+            # available models (Groq, Ollama, etc.) so users can pick any model as a judge.
             judge_options = {**OPENAI_JUDGE_MODELS}
+
+            # Reuse cached models (already populated in the left column) and extend
+            # the judge list with any additional models that aren't already present.
+            all_models = st.session_state.get("cached_models") or get_all_available_models()
+            for key, label in all_models.items():
+                if key not in judge_options:
+                    judge_options[key] = label
+
             selected_judge = st.selectbox(
                 "Judge Model:",
                 options=list(judge_options.keys()),
