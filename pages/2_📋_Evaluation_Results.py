@@ -242,14 +242,84 @@ def create_vulnerability_radar_chart(run_data: Dict[str, Any]):
             radialaxis=dict(
                 visible=True,
                 range=[0, 100],
-                tickfont=dict(size=10)
+                tickfont=dict(size=12)
             ),
             angularaxis=dict(
-                tickfont=dict(size=10)
+                tickfont=dict(size=12)
             )
         ),
         showlegend=False,
-        title="Vulnerability Pass Rates by Category",
+        title="Pass Rates by Vulnerability Category",
+        title_x=0.5,
+        height=400,
+        margin=dict(l=40, r=40, t=60, b=40)
+    )
+
+    return fig
+
+
+def create_attack_method_radar_chart(run_data: Dict[str, Any]):
+    """Create a radar chart showing pass rates by attack method."""
+    test_cases = run_data.get("test_cases", [])
+
+    if not test_cases:
+        return None
+
+    # Group by attack method and calculate pass rates
+    attack_method_stats = {}
+    for tc in test_cases:
+        attack_method = tc.get("attack_method", "Unknown")
+        score = tc.get("score", 0)
+        passed = score >= 0.5
+
+        if attack_method not in attack_method_stats:
+            attack_method_stats[attack_method] = {"passed": 0, "total": 0}
+
+        attack_method_stats[attack_method]["total"] += 1
+        if passed:
+            attack_method_stats[attack_method]["passed"] += 1
+
+    # Calculate pass rates for each attack method
+    methods = []
+    pass_rates = []
+    for method, stats in attack_method_stats.items():
+        if stats["total"] > 0:
+            pass_rate = (stats["passed"] / stats["total"]) * 100
+            methods.append(method)
+            pass_rates.append(pass_rate)
+
+    if not methods:
+        return None
+
+    # Create radar chart
+    fig = go.Figure()
+
+    # Close the polygon by connecting last point to first
+    closed_methods = methods + [methods[0]]
+    closed_pass_rates = pass_rates + [pass_rates[0]]
+
+    fig.add_trace(go.Scatterpolar(
+        r=closed_pass_rates,
+        theta=closed_methods,
+        fill='toself',
+        name='Pass Rate (%)',
+        line_color='purple',
+        fillcolor='rgba(128, 0, 128, 0.1)'
+    ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100],
+                tickfont=dict(size=12)
+            ),
+            angularaxis=dict(
+                tickfont=dict(size=12)
+            )
+        ),
+        showlegend=False,
+        title="Pass Rates by Attack Method",
         title_x=0.5,
         height=400,
         margin=dict(l=40, r=40, t=60, b=40)
@@ -259,19 +329,33 @@ def create_vulnerability_radar_chart(run_data: Dict[str, Any]):
 
 
 def render_vulnerability_radar_chart(run_data: Dict[str, Any]):
-    """Render the vulnerability radar chart."""
+    """Render the vulnerability radar charts (by category and by attack method)."""
     st.subheader("🕸️ Vulnerability Overview")
 
-    fig = create_vulnerability_radar_chart(run_data)
+    vuln_fig = create_vulnerability_radar_chart(run_data)
+    attack_fig = create_attack_method_radar_chart(run_data)
 
-    if fig is None:
+    if vuln_fig is None and attack_fig is None:
         st.info("No vulnerability data available for visualization.")
         return
 
-    st.plotly_chart(fig, width='stretch')
+    # Display charts side by side
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if vuln_fig is not None:
+            st.plotly_chart(vuln_fig, use_container_width=True)
+        else:
+            st.info("No vulnerability category data available.")
+
+    with col2:
+        if attack_fig is not None:
+            st.plotly_chart(attack_fig, use_container_width=True)
+        else:
+            st.info("No attack method data available.")
 
     st.caption("""
-    **Interpretation:** Each axis represents a vulnerability category. The distance from center indicates pass rate percentage.
+    **Interpretation:** Each axis represents a category (left: vulnerability type, right: attack method). The distance from center indicates pass rate percentage.
     Higher values (outer areas) show better security performance. Performance thresholds: ≥90% (strong), 70-89% (moderate), <70% (needs attention).
     """)
 
