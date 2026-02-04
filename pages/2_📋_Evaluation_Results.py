@@ -21,6 +21,65 @@ from evaluation_storage import (
 )
 
 
+# Risk level color mapping (background colors for table cells)
+RISK_COLORS = {
+    "critical": "#ff6b6b",  # Red
+    "high": "#ffa94d",      # Orange
+    "medium": "#ffd43b",    # Yellow
+    "low": "#69db7c",       # Green
+}
+
+# Darker text colors for metrics
+RISK_TEXT_COLORS = {
+    "critical": "#c92a2a",  # Dark red
+    "high": "#d9480f",      # Dark orange
+    "medium": "#e67700",    # Dark yellow/amber
+    "low": "#2f9e44",       # Dark green
+}
+
+
+def get_risk_background_color(value: str) -> str:
+    """Return background color CSS for a risk value."""
+    value_lower = value.lower() if isinstance(value, str) else ""
+    color = RISK_COLORS.get(value_lower, "")
+    if color:
+        return f"background-color: {color}"
+    return ""
+
+
+def style_risk_dataframe(df: pd.DataFrame):
+    """Apply styling to risk-related columns in the dataframe."""
+    risk_columns = ["Base Risk", "Impact", "Adjusted Risk"]
+    
+    def apply_risk_color(val):
+        val_lower = val.lower() if isinstance(val, str) else ""
+        color = RISK_COLORS.get(val_lower, "")
+        if color:
+            return f"background-color: {color}; color: #000000; font-weight: 500"
+        return ""
+    
+    # Apply styling only to risk columns that exist in the dataframe
+    styler = df.style
+    for col in risk_columns:
+        if col in df.columns:
+            styler = styler.map(apply_risk_color, subset=[col])
+    
+    return styler
+
+
+def render_colored_metric(label: str, value: str, is_risk: bool = False):
+    """Render a metric with optional risk-based coloring."""
+    if is_risk:
+        value_lower = value.lower() if isinstance(value, str) else ""
+        color = RISK_TEXT_COLORS.get(value_lower, "#000000")
+        st.markdown(f"""
+        <div style="font-size: 0.875rem; color: rgba(49, 51, 63, 0.6);">{label}</div>
+        <div style="font-size: 1.75rem; font-weight: 600; color: {color};">{value}</div>
+        """, unsafe_allow_html=True)
+    else:
+        st.metric(label, value)
+
+
 def render_header():
     """Render the page header."""
     st.title("📋 Evaluation Results")
@@ -209,7 +268,7 @@ def render_vulnerability_radar_chart(run_data: Dict[str, Any]):
         st.info("No vulnerability data available for visualization.")
         return
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     st.caption("""
     **Interpretation:** Each axis represents a vulnerability category. The distance from center indicates pass rate percentage.
@@ -250,9 +309,9 @@ def render_found_issues(run_data: Dict[str, Any]):
             "Failed Tests": risk_info['failed_count']
         })
 
-    import pandas as pd
     summary_df = pd.DataFrame(summary_data)
-    st.dataframe(summary_df, use_container_width=True)
+    styled_df = style_risk_dataframe(summary_df)
+    st.dataframe(styled_df, hide_index=True, use_container_width=True)
 
     # Show detailed breakdown by vulnerability
     st.markdown("**Failed Test Cases by Vulnerability:**")
@@ -280,9 +339,9 @@ def render_found_issues(run_data: Dict[str, Any]):
             with col2:
                 st.metric("Total Tests", risk_info['total_tests'])
             with col3:
-                st.metric("Base Risk", risk_info['base_risk'].capitalize())
+                render_colored_metric("Base Risk", risk_info['base_risk'].capitalize(), is_risk=True)
             with col4:
-                st.metric("Impact", risk_info['impact'].capitalize())
+                render_colored_metric("Impact", risk_info['impact'].capitalize(), is_risk=True)
 
             st.markdown("---")
 
