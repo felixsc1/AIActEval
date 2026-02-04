@@ -21,12 +21,12 @@ from evaluation_storage import (
 )
 
 
-# Risk level color mapping (background colors for table cells)
+# Risk level color mapping (pastel backgrounds for table cells)
 RISK_COLORS = {
-    "critical": "#ff6b6b",  # Red
-    "high": "#ffa94d",      # Orange
-    "medium": "#ffd43b",    # Yellow
-    "low": "#69db7c",       # Green
+    "critical": "#ffd6d6",  # Pastel Red
+    "high": "#ffe5c2",      # Pastel Orange
+    "medium": "#fff6bc",    # Pastel Yellow
+    "low": "#cbf1d7",       # Pastel Green
 }
 
 # Darker text colors for metrics
