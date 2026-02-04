@@ -15,7 +15,8 @@ from datetime import datetime
 from evaluation_storage import (
     list_evaluation_runs,
     load_evaluation_run,
-    get_failed_test_cases_by_severity,
+    get_failed_test_cases_by_vulnerability,
+    calculate_vulnerability_risks,
     format_datetime_for_display
 )
 
@@ -217,66 +218,101 @@ def render_vulnerability_radar_chart(run_data: Dict[str, Any]):
 
 
 def render_found_issues(run_data: Dict[str, Any]):
-    """Render the found issues section with severity breakdown."""
+    """Render the found issues section with vulnerability-based grouping."""
     st.subheader("⚠️ Found Issues")
 
-    # Get failed test cases grouped by severity
-    severity_groups = get_failed_test_cases_by_severity(run_data)
+    # Get vulnerability risks and failed test cases
+    vulnerability_risks = calculate_vulnerability_risks(run_data)
+    vulnerability_groups = get_failed_test_cases_by_vulnerability(run_data)
 
-    # Count by severity
-    severity_counts = {severity: len(cases) for severity, cases in severity_groups.items()}
+    # Filter to only vulnerabilities with failed tests
+    vulnerabilities_with_failures = {
+        vuln: risk_info for vuln, risk_info in vulnerability_risks.items()
+        if vuln in vulnerability_groups and risk_info["failed_count"] > 0
+    }
 
-    # Display summary
-    col1, col2, col3, col4 = st.columns(4)
+    if not vulnerabilities_with_failures:
+        st.info("No failed test cases found in this evaluation run.")
+        return
 
-    with col1:
-        st.metric("Critical", severity_counts.get("critical", 0))
+    # Show summary table of vulnerabilities with risks
+    st.markdown("**Vulnerability Risk Summary:**")
 
-    with col2:
-        st.metric("High", severity_counts.get("high", 0))
+    # Create summary table
+    summary_data = []
+    for vuln, risk_info in vulnerabilities_with_failures.items():
+        summary_data.append({
+            "Vulnerability": vuln,
+            "Pass Rate": f"{risk_info['pass_rate']:.1%}",
+            "Base Risk": risk_info['base_risk'].capitalize(),
+            "Impact": risk_info['impact'].capitalize(),
+            "Adjusted Risk": risk_info['adjusted_risk'].capitalize(),
+            "Failed Tests": risk_info['failed_count']
+        })
 
-    with col3:
-        st.metric("Medium", severity_counts.get("medium", 0))
+    import pandas as pd
+    summary_df = pd.DataFrame(summary_data)
+    st.dataframe(summary_df, use_container_width=True)
 
-    with col4:
-        st.metric("Low", severity_counts.get("low", 0))
+    # Show detailed breakdown by vulnerability
+    st.markdown("**Failed Test Cases by Vulnerability:**")
 
-    # Show detailed breakdown
-    st.markdown("**Issues by Severity:**")
+    # Sort vulnerabilities by adjusted risk (critical first)
+    risk_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    sorted_vulnerabilities = sorted(
+        vulnerabilities_with_failures.keys(),
+        key=lambda v: risk_order.get(vulnerabilities_with_failures[v]["adjusted_risk"], 3)
+    )
 
-    for severity in ["critical", "high", "medium", "low"]:
-        cases = severity_groups[severity]
-        if cases:
-            severity_title = severity.capitalize()
+    for vulnerability in sorted_vulnerabilities:
+        risk_info = vulnerabilities_with_failures[vulnerability]
+        cases = vulnerability_groups[vulnerability]
 
-            with st.expander(f"{severity_title} Issues ({len(cases)})", expanded=(severity == "critical")):
-                for i, case in enumerate(cases):
-                    vulnerability = case.get("vulnerability", "Unknown")
-                    vuln_type = case.get("vulnerability_type", "")
-                    attack_method = case.get("attack_method", "Unknown")
+        # Create expander title with risk information
+        expander_title = f"{vulnerability} ({len(cases)} failed) - Adjusted Risk: {risk_info['adjusted_risk'].capitalize()}"
+        expander_title += f" (Base: {risk_info['base_risk'].capitalize()}, Impact: {risk_info['impact'].capitalize()})"
 
-                    # Create expander title
-                    expander_title = f"{vulnerability}"
-                    if vuln_type:
-                        expander_title += f" ({vuln_type})"
-                    expander_title += f" - {attack_method}"
+        with st.expander(expander_title, expanded=(risk_info['adjusted_risk'] == "critical")):
+            # Show risk calculation details
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Pass Rate", f"{risk_info['pass_rate']:.1%}")
+            with col2:
+                st.metric("Total Tests", risk_info['total_tests'])
+            with col3:
+                st.metric("Base Risk", risk_info['base_risk'].capitalize())
+            with col4:
+                st.metric("Impact", risk_info['impact'].capitalize())
 
-                    with st.expander(f"#{i+1}: {expander_title}", expanded=False):
-                        # Prompt
-                        st.markdown("**Prompt:**")
-                        st.code(case.get("input", ""), language=None)
+            st.markdown("---")
 
-                        # Model output
-                        st.markdown("**Model Output:**")
-                        st.code(case.get("actual_output", ""), language=None)
+            # List all failed test cases
+            for i, case in enumerate(cases):
+                vulnerability_type = case.get("vulnerability_type", "")
+                attack_method = case.get("attack_method", "Unknown")
 
-                        # Judge reason
-                        st.markdown("**Judge Reason:**")
-                        st.write(case.get("reason", "No reason provided"))
+                # Create test case title
+                test_title = f"{vulnerability}"
+                if vulnerability_type:
+                    test_title += f" ({vulnerability_type})"
+                test_title += f" - {attack_method}"
 
-                        # Additional metadata
-                        score = case.get("score", 0)
-                        st.caption(f"Score: {score:.2f} | Attack: {attack_method}")
+                with st.expander(f"#{i+1}: {test_title}", expanded=False):
+                    # Prompt
+                    st.markdown("**Prompt:**")
+                    st.code(case.get("input", ""), language=None)
+
+                    # Model output
+                    st.markdown("**Model Output:**")
+                    st.code(case.get("actual_output", ""), language=None)
+
+                    # Judge reason
+                    st.markdown("**Judge Reason:**")
+                    st.write(case.get("reason", "No reason provided"))
+
+                    # Additional metadata
+                    score = case.get("score", 0)
+                    st.caption(f"Score: {score:.2f} | Attack: {attack_method}")
 
 
 def main():
