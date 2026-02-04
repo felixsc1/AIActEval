@@ -17,7 +17,9 @@ from evaluation_storage import (
     load_evaluation_run,
     get_failed_test_cases_by_vulnerability,
     calculate_vulnerability_risks,
-    format_datetime_for_display
+    format_datetime_for_display,
+    VULNERABILITY_DESCRIPTIONS,
+    ATTACK_METHOD_DESCRIPTIONS
 )
 
 
@@ -328,6 +330,76 @@ def create_attack_method_radar_chart(run_data: Dict[str, Any]):
     return fig
 
 
+def render_vulnerability_help_popover(present_vulnerabilities: set):
+    """Render a help popover explaining vulnerability types present in the dataset."""
+    if not present_vulnerabilities:
+        return
+    
+    with st.popover("ℹ️ Help"):
+        st.markdown("### Vulnerability Types Explained")
+        st.markdown("*Below are explanations for each vulnerability category tested in this evaluation.*")
+        st.markdown("---")
+        
+        for vuln_name in sorted(present_vulnerabilities):
+            if vuln_name in VULNERABILITY_DESCRIPTIONS:
+                vuln_info = VULNERABILITY_DESCRIPTIONS[vuln_name]
+                
+                st.markdown(f"#### {vuln_info['title']}")
+                st.markdown(vuln_info["description"])
+                
+                # Display test types as a compact list
+                st.markdown("**Test Types:**")
+                for type_name, type_desc in vuln_info["types"]:
+                    st.markdown(f"- **{type_name}:** {type_desc}")
+                
+                st.markdown(f"**Expected Behavior:** {vuln_info['expected_behavior']}")
+                st.caption(f"📋 Regulatory Relevance: {vuln_info['regulatory_relevance']}")
+                st.markdown("---")
+            else:
+                # Fallback for unknown vulnerability types
+                st.markdown(f"#### {vuln_name}")
+                st.markdown("*No detailed description available for this vulnerability type.*")
+                st.markdown("---")
+        
+        st.caption("Source: [DeepTeam Documentation](https://www.trydeepteam.com/docs/)")
+
+
+def render_attack_method_help_popover(present_attacks: set):
+    """Render a help popover explaining attack methods present in the dataset."""
+    if not present_attacks:
+        return
+    
+    with st.popover("ℹ️ Help"):
+        st.markdown("### Attack Methods Explained")
+        st.markdown("*Below are explanations for each attack method used in this evaluation.*")
+        st.markdown("---")
+        
+        for attack_name in sorted(present_attacks):
+            if attack_name in ATTACK_METHOD_DESCRIPTIONS:
+                attack_info = ATTACK_METHOD_DESCRIPTIONS[attack_name]
+                
+                st.markdown(f"#### {attack_info['title']}")
+                st.caption(f"Category: {attack_info['category']}")
+                st.markdown(attack_info["description"])
+                
+                # Display example
+                example = attack_info.get("example", {})
+                if example:
+                    st.markdown("**Example:**")
+                    st.markdown(f"- *Base attack:* \"{example.get('base', '')}\"")
+                    st.markdown(f"- *Enhanced:* \"{example.get('enhanced', '')}\"")
+                
+                st.markdown(f"**How it works:** {attack_info['how_it_works']}")
+                st.markdown("---")
+            else:
+                # Fallback for unknown attack methods
+                st.markdown(f"#### {attack_name}")
+                st.markdown("*No detailed description available for this attack method.*")
+                st.markdown("---")
+        
+        st.caption("Source: [DeepTeam Documentation](https://www.trydeepteam.com/docs/)")
+
+
 def render_vulnerability_radar_chart(run_data: Dict[str, Any]):
     """Render the vulnerability radar charts (by category and by attack method)."""
     st.subheader("🕸️ Vulnerability Overview")
@@ -339,24 +411,43 @@ def render_vulnerability_radar_chart(run_data: Dict[str, Any]):
         st.info("No vulnerability data available for visualization.")
         return
 
+    # Extract present vulnerabilities for help popover
+    overview = run_data.get("overview", {})
+    vuln_results = overview.get("vulnerability_type_results", [])
+    present_vulnerabilities = set()
+    for vr in vuln_results:
+        vulnerability = vr.get("vulnerability", "")
+        if vulnerability:
+            present_vulnerabilities.add(vulnerability)
+
+    # Extract present attack methods for help popover
+    test_cases = run_data.get("test_cases", [])
+    present_attacks = set()
+    for tc in test_cases:
+        attack_method = tc.get("attack_method", "")
+        if attack_method:
+            present_attacks.add(attack_method)
+
     # Display charts side by side
     col1, col2 = st.columns(2)
 
     with col1:
         if vuln_fig is not None:
-            st.plotly_chart(vuln_fig, use_container_width=True)
+            st.plotly_chart(vuln_fig, width='stretch')
+            render_vulnerability_help_popover(present_vulnerabilities)
         else:
             st.info("No vulnerability category data available.")
 
     with col2:
         if attack_fig is not None:
-            st.plotly_chart(attack_fig, use_container_width=True)
+            st.plotly_chart(attack_fig, width='stretch')
+            render_attack_method_help_popover(present_attacks)
         else:
             st.info("No attack method data available.")
 
     st.caption("""
-    **Interpretation:** Each axis represents a category (left: vulnerability type, right: attack method). The distance from center indicates pass rate percentage.
-    Higher values (outer areas) show better security performance. Performance thresholds: ≥90% (strong), 70-89% (moderate), <70% (needs attention).
+    **Interpretation:** Each axis represents a category (left: vulnerability type, right: attack method). The distance from center percentage of passing tests.
+    Higher values (outer areas) show better security performance.
     """)
 
 
