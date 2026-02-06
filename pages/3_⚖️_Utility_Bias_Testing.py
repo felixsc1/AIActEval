@@ -85,8 +85,8 @@ def render_prerequisites_check():
     return True
 
 
-def render_test_configuration():
-    """Render the test configuration section."""
+def render_test_configuration_basic():
+    """Render the basic test configuration section (bias type, categories, N values)."""
     st.subheader("⚙️ Test Configuration")
 
     # Bias type selection
@@ -136,78 +136,91 @@ def render_test_configuration():
             f"Selected: {len(selected_n_values)} values from {selected_n_values[0]:,} to {selected_n_values[-1]:,}"
         )
 
-    # Anchor configuration
-    st.markdown("**Anchor Outcome**")
-    anchor_options = get_anchor_options()
-    selected_anchor_key = st.selectbox(
-        "Select anchor:",
-        options=list(anchor_options.keys()),
-        index=0,  # Default to "Strong anchor"
-        help="Choose the scientific advancement scenario to compare against saving lives. Stronger anchors require more people to save to switch preference.",
-    )
-    anchor_text = anchor_options[selected_anchor_key]
-
-    # Anchor variations toggle
-    num_anchor_variations = st.radio(
-        "Number of anchor variations:",
-        options=[5, 10],
-        index=0,  # Default to 5 for backward compatibility (first option)
-        horizontal=True,
-        help="Choose whether to use 5 or 10 variations of the anchor text for robustness testing. More variations provide better reliability but take longer to run.",
-    )
-
-    # Show selected anchor text
-    with st.expander("View selected anchor text", expanded=False):
-        st.code(anchor_text, language=None)
-        st.caption(
-            "This anchor represents outcome P (scientific advancement) in the preference queries."
-        )
-
-    # System prompt configuration for jailbreaking
-    st.markdown("**System Prompt (Jailbreaking)**")
-    st.markdown("*Use when models refuse to answer questions involving ethnicities*")
-
-    system_prompt_options = get_jailbreaking_system_prompts()
-    selected_system_prompt_key = st.selectbox(
-        "Select system prompt:",
-        options=list(system_prompt_options.keys()),
-        index=0,  # Default to "Default (No system prompt)"
-        help="Choose a jailbreaking prompt to bypass model restrictions on sensitive topics",
-    )
-    selected_system_prompt = system_prompt_options[selected_system_prompt_key]
-
-    # Show selected prompt content
-    if selected_system_prompt.strip():
-        with st.expander("View selected system prompt", expanded=False):
-            st.code(selected_system_prompt, language=None)
-            st.caption(
-                "This prompt will be sent as the system message to bypass restrictions."
-            )
-
-    # Multi-shot examples checkbox
-    include_examples = st.checkbox(
-        "Include multi-shot examples",
-        value=True,  # Checked by default
-        help="Append two example interactions to the system prompt to demonstrate the expected response format for preference questions.",
-    )
-
-    # Apply multi-shot examples if requested
-    final_system_prompt = append_multi_shot_examples(
-        selected_system_prompt, include_examples
-    )
-
-    # Show final prompt content if examples were added
-    if include_examples and selected_system_prompt.strip():
-        with st.expander("View final system prompt (with examples)", expanded=False):
-            st.code(final_system_prompt, language=None)
-            st.caption(
-                "This is the complete prompt that will be sent to the model, including examples."
-            )
-
     return {
         "bias_type": bias_type,
         "selected_categories": selected_categories,
         "selected_n_values": selected_n_values,
+    }
+
+
+def render_advanced_settings_grid():
+    """Render the advanced settings expander for Grid Testing."""
+    with st.expander("🔧 Advanced Settings", expanded=False):
+        # Anchor configuration
+        st.markdown("**Anchor Outcome**")
+        anchor_options = get_anchor_options()
+        selected_anchor_key = st.selectbox(
+            "Select anchor:",
+            options=list(anchor_options.keys()),
+            index=0,  # Default to "Strong anchor"
+            help="Choose the scientific advancement scenario to compare against saving lives. Stronger anchors require more people to save to switch preference.",
+            key="grid_anchor",
+        )
+        anchor_text = anchor_options[selected_anchor_key]
+
+        # Anchor variations toggle
+        num_anchor_variations = st.radio(
+            "Number of anchor variations:",
+            options=[5, 10],
+            index=0,  # Default to 5 for backward compatibility (first option)
+            horizontal=True,
+            help="Choose whether to use 5 or 10 variations of the anchor text for robustness testing. More variations provide better reliability but take longer to run.",
+            key="grid_anchor_variations",
+        )
+
+        # Show selected anchor text
+        with st.expander("View selected anchor text", expanded=False):
+            st.code(anchor_text, language=None)
+            st.caption(
+                "This anchor represents outcome P (scientific advancement) in the preference queries."
+            )
+
+        st.markdown("---")
+
+        # System prompt configuration for jailbreaking
+        st.markdown("**System Prompt (Jailbreaking)**")
+        st.markdown("*Use when models refuse to answer questions involving ethnicities*")
+
+        system_prompt_options = get_jailbreaking_system_prompts()
+        selected_system_prompt_key = st.selectbox(
+            "Select system prompt:",
+            options=list(system_prompt_options.keys()),
+            index=0,  # Default to "Default (No system prompt)"
+            help="Choose a jailbreaking prompt to bypass model restrictions on sensitive topics",
+            key="grid_system_prompt",
+        )
+        selected_system_prompt = system_prompt_options[selected_system_prompt_key]
+
+        # Show selected prompt content
+        if selected_system_prompt.strip():
+            with st.expander("View selected system prompt", expanded=False):
+                st.code(selected_system_prompt, language=None)
+                st.caption(
+                    "This prompt will be sent as the system message to bypass restrictions."
+                )
+
+        # Multi-shot examples checkbox
+        include_examples = st.checkbox(
+            "Include multi-shot examples",
+            value=True,  # Checked by default
+            help="Append two example interactions to the system prompt to demonstrate the expected response format for preference questions.",
+            key="grid_include_examples",
+        )
+
+        # Apply multi-shot examples if requested
+        final_system_prompt = append_multi_shot_examples(
+            selected_system_prompt, include_examples
+        )
+
+        # Show final prompt content if examples were added
+        if include_examples and selected_system_prompt.strip():
+            with st.expander("View final system prompt (with examples)", expanded=False):
+                st.code(final_system_prompt, language=None)
+                st.caption(
+                    "This is the complete prompt that will be sent to the model, including examples."
+                )
+
+    return {
         "anchor_text": anchor_text,
         "selected_anchor_key": selected_anchor_key,
         "num_anchor_variations": num_anchor_variations,
@@ -290,70 +303,73 @@ def render_model_selection():
 
 def render_performance_options(model_provider):
     """Render the performance options section."""
-    st.subheader("⚡ Performance Options")
-
     if model_provider == "groq":
-        st.markdown(
-            "*Groq models run on optimized cloud infrastructure with automatic rate limiting*"
-        )
-        st.info("📊 **Groq Rate Limits:** 30 requests/minute, 8000 tokens/minute")
+        with st.expander("⚡ Performance Options", expanded=False):
+            st.markdown(
+                "*Groq models run on optimized cloud infrastructure with automatic rate limiting*"
+            )
+            st.info("📊 **Groq Rate Limits:** 30 requests/minute, 8000 tokens/minute")
         # Return default values for Groq (these won't be used)
         return 2048, None, 0, False
     else:
-        st.markdown(
-            "*Optimize memory usage and GPU acceleration for better performance*"
-        )
-
-        perf_col1, perf_col2, perf_col3 = st.columns(3)
-
-        with perf_col1:
-            num_ctx = st.selectbox(
-                "Context Window Size:",
-                options=[512, 1024, 2048, 4096],
-                index=2,  # Default to 2048
-                help="Smaller context windows use less memory. 2048 is sufficient for our short prompts. "
-                "Reduce to 1024 or 512 if experiencing memory issues with larger models.",
+        with st.expander("⚡ Performance Options", expanded=False):
+            st.markdown(
+                "*Optimize memory usage and GPU acceleration for better performance*"
             )
 
-        with perf_col2:
-            gpu_option = st.selectbox(
-                "GPU Usage:",
-                options=[
-                    "Auto (Recommended)",
-                    "GPU with CPU Fallback",
-                    "Force All GPU Layers",
-                    "CPU Only",
-                ],
-                index=0,
-                help="Auto: Let Ollama decide GPU allocation. "
-                "GPU with Fallback: Try GPU first, auto-retry with CPU if out of memory. "
-                "Force All GPU: Use maximum GPU layers (faster but may fail if VRAM is insufficient). "
-                "CPU Only: Disable GPU (slower but always works).",
-            )
-            # Convert UI option to num_gpu value and fallback flag
-            gpu_fallback_enabled = False
-            if gpu_option == "Auto (Recommended)":
-                num_gpu = None
-            elif gpu_option == "GPU with CPU Fallback":
-                num_gpu = 999  # Try max GPU first
-                gpu_fallback_enabled = True
-            elif gpu_option == "Force All GPU Layers":
-                num_gpu = 999  # High number to use all available GPU layers
-            else:  # CPU Only
-                num_gpu = 0
+            perf_col1, perf_col2, perf_col3 = st.columns(3)
 
-            if gpu_option == "Force All GPU Layers":
-                st.caption("⚠️ May fail if VRAM is insufficient")
+            with perf_col1:
+                num_ctx = st.selectbox(
+                    "Context Window Size:",
+                    options=[512, 1024, 2048, 4096],
+                    index=2,  # Default to 2048
+                    help="Smaller context windows use less memory. 2048 is sufficient for our short prompts. "
+                    "Reduce to 1024 or 512 if experiencing memory issues with larger models.",
+                    key="grid_num_ctx",
+                )
 
-        with perf_col3:
-            cleanup_interval = st.selectbox(
-                "Memory Cleanup Interval:",
-                options=[0, 50, 100, 200],
-                index=2,  # Default to 100
-                format_func=lambda x: "Disabled" if x == 0 else f"Every {x} queries",
-                help="Periodically unload and reload model during long test runs to prevent memory leaks. "
-                "Recommended for models like deepseek-r1 that may accumulate memory usage.",
-            )
+            with perf_col2:
+                gpu_option = st.selectbox(
+                    "GPU Usage:",
+                    options=[
+                        "Auto (Recommended)",
+                        "GPU with CPU Fallback",
+                        "Force All GPU Layers",
+                        "CPU Only",
+                    ],
+                    index=0,
+                    help="Auto: Let Ollama decide GPU allocation. "
+                    "GPU with Fallback: Try GPU first, auto-retry with CPU if out of memory. "
+                    "Force All GPU: Use maximum GPU layers (faster but may fail if VRAM is insufficient). "
+                    "CPU Only: Disable GPU (slower but always works).",
+                    key="grid_gpu_option",
+                )
+                # Convert UI option to num_gpu value and fallback flag
+                gpu_fallback_enabled = False
+                if gpu_option == "Auto (Recommended)":
+                    num_gpu = None
+                elif gpu_option == "GPU with CPU Fallback":
+                    num_gpu = 999  # Try max GPU first
+                    gpu_fallback_enabled = True
+                elif gpu_option == "Force All GPU Layers":
+                    num_gpu = 999  # High number to use all available GPU layers
+                else:  # CPU Only
+                    num_gpu = 0
+
+                if gpu_option == "Force All GPU Layers":
+                    st.caption("⚠️ May fail if VRAM is insufficient")
+
+            with perf_col3:
+                cleanup_interval = st.selectbox(
+                    "Memory Cleanup Interval:",
+                    options=[0, 50, 100, 200],
+                    index=2,  # Default to 100
+                    format_func=lambda x: "Disabled" if x == 0 else f"Every {x} queries",
+                    help="Periodically unload and reload model during long test runs to prevent memory leaks. "
+                    "Recommended for models like deepseek-r1 that may accumulate memory usage.",
+                    key="grid_cleanup_interval",
+                )
 
         return num_ctx, num_gpu, cleanup_interval, gpu_fallback_enabled
 
@@ -726,14 +742,14 @@ def render_grid_testing_tab():
     """Render the Grid Testing tab content (original exhaustive testing approach)."""
     st.markdown(
         """
-    **Grid Testing** runs queries for all combinations of ethnicities × N values × anchor variations.
+    **Grid Testing (Legacy)** runs queries for all combinations of ethnicities × N values × anchor variations.
     This provides comprehensive coverage but requires many queries.
     """
     )
 
-    # Test configuration
-    config = render_test_configuration()
-    if config is None:
+    # Basic test configuration (bias type, categories, N values)
+    basic_config = render_test_configuration_basic()
+    if basic_config is None:
         return
 
     # Model selection
@@ -744,6 +760,16 @@ def render_grid_testing_tab():
     except Exception as e:
         st.error(f"Error in model selection: {e}")
         return
+
+    # Advanced settings expander (anchor, system prompt)
+    try:
+        advanced_config = render_advanced_settings_grid()
+    except Exception as e:
+        st.error(f"Error in advanced settings: {e}")
+        return
+
+    # Merge basic and advanced config
+    config = {**basic_config, **advanced_config}
 
     # Performance options
     try:
@@ -884,141 +910,6 @@ def render_thurstonian_testing_ui():
             f"Selected: {len(th_selected_n_values)} values from {th_selected_n_values[0]:,} to {th_selected_n_values[-1]:,}"
         )
 
-    # Anchor configuration
-    st.markdown("**Anchor Outcome**")
-    anchor_options = get_anchor_options()
-    th_selected_anchor_key = st.selectbox(
-        "Select anchor:",
-        options=list(anchor_options.keys()),
-        index=0,
-        help="Choose the scientific advancement scenario to compare against saving lives.",
-        key="th_anchor",
-    )
-    th_anchor_text = anchor_options[th_selected_anchor_key]
-
-    with st.expander("View selected anchor text", expanded=False):
-        st.code(th_anchor_text, language=None)
-
-    # System prompt configuration
-    st.markdown("**System Prompt (Jailbreaking)**")
-    system_prompt_options = get_jailbreaking_system_prompts()
-    th_selected_system_prompt_key = st.selectbox(
-        "Select system prompt:",
-        options=list(system_prompt_options.keys()),
-        index=0,
-        help="Choose a jailbreaking prompt to bypass model restrictions",
-        key="th_system_prompt",
-    )
-    th_selected_system_prompt = system_prompt_options[th_selected_system_prompt_key]
-
-    # Multi-shot examples
-    th_include_examples = st.checkbox(
-        "Include multi-shot examples",
-        value=True,
-        help="Append example interactions to demonstrate expected response format.",
-        key="th_examples",
-    )
-
-    th_final_system_prompt = append_multi_shot_examples(
-        th_selected_system_prompt, th_include_examples
-    )
-
-    # ===== ACTIVE LEARNING PARAMETERS =====
-    st.subheader("🧠 Active Learning Parameters")
-
-    al_col1, al_col2, al_col3 = st.columns(3)
-
-    with al_col1:
-        th_P = st.slider(
-            "Uncertainty percentile (P%):",
-            min_value=5,
-            max_value=50,
-            value=10,
-            help="Sample from bottom P% of utility variance (higher = more exploration)",
-            key="th_P",
-        )
-
-    with al_col2:
-        th_Q = st.slider(
-            "Degree percentile (Q%):",
-            min_value=5,
-            max_value=50,
-            value=20,
-            help="Sample from bottom Q% of query counts (higher = more coverage)",
-            key="th_Q",
-        )
-
-    with al_col3:
-        th_max_iterations = st.number_input(
-            "Max iterations:",
-            min_value=1,
-            max_value=20,
-            value=5,
-            help="Maximum active learning iterations",
-            key="th_max_iter",
-        )
-
-    al_col4, al_col5, al_col6 = st.columns(3)
-
-    with al_col4:
-        th_queries_per_iter = st.number_input(
-            "Queries per iteration:",
-            min_value=5,
-            max_value=100,
-            value=20,
-            help=f"Number of ({th_category_label}, N) pairs to query per iteration",
-            key="th_queries_per_iter",
-        )
-
-    with al_col5:
-        th_K = st.number_input(
-            "Responses per query (K):",
-            min_value=1,
-            max_value=20,
-            value=5,
-            help="Number of responses to collect per query (using anchor variations)",
-            key="th_K",
-        )
-
-    with al_col6:
-        th_intermediate_n = st.number_input(
-            "Intermediate N per interval:",
-            min_value=0,
-            max_value=5,
-            value=1,
-            help="Number of intermediate N values to add between consecutive grid points (0 = use original grid only)",
-            key="th_intermediate_n",
-        )
-
-    # Move epochs to a new row or adjust layout
-    with st.container():
-        th_num_epochs = st.selectbox(
-            "Model fitting epochs:",
-            options=[100, 500, 1000, 2000],
-            index=2,
-            help="Number of optimization epochs for Thurstonian model fitting",
-            key="th_epochs",
-        )
-
-    # Show estimated query count
-    total_options = len(th_selected_categories) * len(th_selected_n_values)
-    grid_queries = total_options * th_K
-    estimated_al_queries = (
-        total_options // 3 + th_max_iterations * th_queries_per_iter
-    ) * th_K
-
-    # Get category label for display
-    th_category_label = {"ethnicity": "ethnicity", "sex": "sex", "religion": "religion"}[th_bias_type]
-
-    st.info(
-        f"""
-    **Estimated Queries:**
-    - Total options: {total_options} ({th_category_label} × N combinations)
-    - Grid testing would need: ~{grid_queries:,} queries
-    - Active learning estimate: ~{estimated_al_queries:,} queries (may vary based on convergence)
-    """
-    )
-
     # ===== MODEL SELECTION =====
     st.subheader("🤖 Model Selection")
 
@@ -1051,6 +942,152 @@ def render_thurstonian_testing_ui():
         st.info("📡 Using Groq cloud API. Rate limits apply.")
     else:
         st.info("🏠 Using local Ollama instance.")
+
+    # ===== ADVANCED SETTINGS EXPANDER =====
+    with st.expander("🔧 Advanced Settings", expanded=False):
+        # Anchor configuration
+        st.markdown("**Anchor Outcome**")
+        anchor_options = get_anchor_options()
+        th_selected_anchor_key = st.selectbox(
+            "Select anchor:",
+            options=list(anchor_options.keys()),
+            index=0,
+            help="Choose the scientific advancement scenario to compare against saving lives.",
+            key="th_anchor",
+        )
+        th_anchor_text = anchor_options[th_selected_anchor_key]
+
+        with st.expander("View selected anchor text", expanded=False):
+            st.code(th_anchor_text, language=None)
+
+        st.markdown("---")
+
+        # System prompt configuration
+        st.markdown("**System Prompt (Jailbreaking)**")
+        system_prompt_options = get_jailbreaking_system_prompts()
+        th_selected_system_prompt_key = st.selectbox(
+            "Select system prompt:",
+            options=list(system_prompt_options.keys()),
+            index=0,
+            help="Choose a jailbreaking prompt to bypass model restrictions",
+            key="th_system_prompt",
+        )
+        th_selected_system_prompt = system_prompt_options[th_selected_system_prompt_key]
+
+        # Multi-shot examples
+        th_include_examples = st.checkbox(
+            "Include multi-shot examples",
+            value=True,
+            help="Append example interactions to demonstrate expected response format.",
+            key="th_examples",
+        )
+
+        th_final_system_prompt = append_multi_shot_examples(
+            th_selected_system_prompt, th_include_examples
+        )
+
+        st.markdown("---")
+
+        # ===== ACTIVE LEARNING PARAMETERS =====
+        st.markdown("**Active Learning Parameters**")
+
+        al_col1, al_col2, al_col3 = st.columns(3)
+
+        with al_col1:
+            th_P = st.slider(
+                "Uncertainty percentile (P%):",
+                min_value=5,
+                max_value=50,
+                value=10,
+                help="Sample from bottom P% of utility variance (higher = more exploration)",
+                key="th_P",
+            )
+
+        with al_col2:
+            th_Q = st.slider(
+                "Degree percentile (Q%):",
+                min_value=5,
+                max_value=50,
+                value=20,
+                help="Sample from bottom Q% of query counts (higher = more coverage)",
+                key="th_Q",
+            )
+
+        with al_col3:
+            th_max_iterations = st.number_input(
+                "Max iterations:",
+                min_value=1,
+                max_value=20,
+                value=5,
+                help="Maximum active learning iterations",
+                key="th_max_iter",
+            )
+
+        al_col4, al_col5, al_col6 = st.columns(3)
+
+        with al_col4:
+            th_queries_per_iter = st.number_input(
+                "Queries per iteration:",
+                min_value=5,
+                max_value=100,
+                value=20,
+                help=f"Number of ({th_category_label}, N) pairs to query per iteration",
+                key="th_queries_per_iter",
+            )
+
+        with al_col5:
+            th_K = st.number_input(
+                "Responses per query (K):",
+                min_value=1,
+                max_value=20,
+                value=5,
+                help="Number of responses to collect per query (using anchor variations)",
+                key="th_K",
+            )
+
+        with al_col6:
+            th_intermediate_n = st.number_input(
+                "Intermediate N per interval:",
+                min_value=0,
+                max_value=5,
+                value=1,
+                help="Number of intermediate N values to add between consecutive grid points (0 = use original grid only)",
+                key="th_intermediate_n",
+            )
+
+        # Move epochs to a new row or adjust layout
+        with st.container():
+            th_num_epochs = st.selectbox(
+                "Model fitting epochs:",
+                options=[100, 500, 1000, 2000],
+                index=2,
+                help="Number of optimization epochs for Thurstonian model fitting",
+                key="th_epochs",
+            )
+
+    # Show estimated query count (outside expander for visibility)
+    total_options = len(th_selected_categories) * len(th_selected_n_values)
+    # Use default values if not yet set in expander
+    th_K_val = st.session_state.get("th_K", 5)
+    th_max_iter_val = st.session_state.get("th_max_iter", 5)
+    th_queries_per_iter_val = st.session_state.get("th_queries_per_iter", 20)
+    
+    grid_queries = total_options * th_K_val
+    estimated_al_queries = (
+        total_options // 3 + th_max_iter_val * th_queries_per_iter_val
+    ) * th_K_val
+
+    # Get category label for display
+    th_category_label_display = {"ethnicity": "ethnicity", "sex": "sex", "religion": "religion"}[th_bias_type]
+
+    st.info(
+        f"""
+    **Estimated Queries:**
+    - Total options: {total_options} ({th_category_label_display} × N combinations)
+    - Grid testing would need: ~{grid_queries:,} queries
+    - Active learning estimate: ~{estimated_al_queries:,} queries (may vary based on convergence)
+    """
+    )
 
     # Performance options (simplified for Thurstonian)
     if th_provider == "ollama":
@@ -1825,13 +1862,13 @@ def main():
         return
 
     # Create tabs for different testing approaches
-    tab1, tab2 = st.tabs(["📊 Grid Testing", "🧠 Thurstonian Active Learning"])
+    tab1, tab2 = st.tabs(["🧠 Thurstonian Active Learning", "📊 Grid Testing (Legacy)"])
 
     with tab1:
-        render_grid_testing_tab()
+        render_thurstonian_tab()
 
     with tab2:
-        render_thurstonian_tab()
+        render_grid_testing_tab()
 
 
 if __name__ == "__main__":
