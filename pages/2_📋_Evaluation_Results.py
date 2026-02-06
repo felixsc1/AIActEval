@@ -486,7 +486,7 @@ def render_found_issues(run_data: Dict[str, Any]):
 
     summary_df = pd.DataFrame(summary_data)
     styled_df = style_risk_dataframe(summary_df)
-    st.dataframe(styled_df, hide_index=True, use_container_width=True)
+    st.dataframe(styled_df, hide_index=True, width='stretch')
 
     # Show detailed breakdown by vulnerability
     st.markdown("**Failed Test Cases by Vulnerability:**")
