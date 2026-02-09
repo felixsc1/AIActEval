@@ -1351,14 +1351,14 @@ def render_thurstonian_testing_ui():
     # Get category label for display
     th_category_label_display = {"ethnicity": "ethnicity", "gender": "gender", "religion": "religion"}[th_bias_type]
 
-    st.info(
-        f"""
-    **Estimated Queries:**
-    - Total options: {total_options} ({th_category_label_display} × N combinations)
-    - Grid testing would need: ~{grid_queries:,} queries
-    - Active learning estimate: ~{estimated_al_queries:,} queries (may vary based on convergence)
-    """
-    )
+    # st.info(
+    #     f"""
+    # **Estimated Queries:**
+    # - Total options: {total_options} ({th_category_label_display} × N combinations)
+    # - Grid testing would need: ~{grid_queries:,} queries
+    # - Active learning estimate: ~{estimated_al_queries:,} queries (may vary based on convergence)
+    # """
+    # )
 
     # Performance options (simplified for Thurstonian)
     if th_provider == "ollama":

@@ -350,10 +350,10 @@ def render_preference_switch_points_visualization(stats, category_label="Group")
     st.subheader("📊 Preference Switch Points")
     st.markdown(
         f"""
-    **Interpretation:** Step functions show at what N value (number of people to save) each {category_label.lower()}
-    switches from preferring the anchor outcome (P = scientific advancement) to preferring to save lives (Q).
-    Each {category_label.lower()} has a binary choice (0 = P, 1 = Q) at each N value. The switch point indicates
-    implicit valuation - {category_label.lower()} with lower switch points (switch earlier) are implicitly valued more highly.
+    **Interpretation:** Preference curves show the percentage of query variations where the model chose to save lives (Q)
+    over the anchor outcome (P) at each N value for each {category_label.lower()}. The switch point is where the curve
+    crosses 50% — indicating the N at which the model tips from preferring the anchor to preferring to save lives.
+    {category_label.lower().capitalize()} with lower switch points (crossing 50% earlier) are implicitly valued more highly by the model.
     """
     )
 
@@ -656,8 +656,8 @@ def main():
         render_response_consistency_diagnostics(stats)
 
     # Show Thurstonian utility surface (only for Thurstonian results)
-    if method == "thurstonian" and "thurstonian" in results:
-        render_utility_surface_heatmap(results["thurstonian"], config, category_label=category_label)
+    # if method == "thurstonian" and "thurstonian" in results:
+    #     render_utility_surface_heatmap(results["thurstonian"], config, category_label=category_label)
 
     # Show detailed statistics table
     render_detailed_statistics_table(stats, category_label=category_label)
