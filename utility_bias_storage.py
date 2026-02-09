@@ -5,7 +5,7 @@ Handles persistent storage of utility bias test runs as JSON files.
 Provides functions for saving, listing, and loading test results.
 
 Supports two testing methods:
-- Grid testing (method="grid"): Exhaustive grid search over ethnicities × N values
+- Grid testing (method="grid"): Exhaustive grid search over groups × N values
 - Thurstonian active learning (method="thurstonian"): Intelligent sampling with utility model
 
 Schema version history:
@@ -174,7 +174,7 @@ def generate_run_id(model_name: str, bias_type: str = "ethnicity") -> str:
 
     Args:
         model_name: Name of the model used in the test
-        bias_type: Type of bias dimension ("ethnicity", "sex", "religion")
+        bias_type: Type of bias dimension ("ethnicity", "gender", "religion")
 
     Returns:
         Unique run identifier string
@@ -279,7 +279,7 @@ def list_utility_bias_runs() -> List[Dict[str, Any]]:
                     'model': data.get('model_info', {}).get('ollama_model', 'Unknown'),
                     'anchor_key': data.get('test_config', {}).get('anchor_key', 'Unknown'),
                     'bias_type': data.get('test_config', {}).get('bias_type', 'ethnicity'),
-                    'num_ethnicities': len(data.get('test_config', {}).get('ethnicities', [])),
+                    'num_groups': len(data.get('test_config', {}).get('ethnicities', [])),
                     'num_n_values': len(data.get('test_config', {}).get('n_values', [])),
                     'num_anchor_variations': data.get('test_config', {}).get('num_anchor_variations', 0),
                     'status': data.get('run_metadata', {}).get('status', 'Unknown'),

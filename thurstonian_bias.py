@@ -961,7 +961,7 @@ def convert_thurstonian_to_results_format(
 
         summary_data.append(
             {
-                "Ethnicity": ethnicity,
+                "Group": ethnicity,
                 "Refusal Rate (%)": f"{refusal_rate:.1f}%",
                 "Switch Point (N)": f"{sp:,.0f}" if sp is not None else "N/A",
                 "Exchange Rate": f"{er:.2f}x" if er != 0 else "Reference",

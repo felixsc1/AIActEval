@@ -26,7 +26,7 @@ from utility_bias import (
     create_exchange_rates_plot,
     create_summary_table,
     get_default_ethnicities,
-    get_default_sexes,
+    get_default_genders,
     get_default_religions,
     get_bias_type_config,
     get_default_n_values,
@@ -50,7 +50,7 @@ def render_header():
     st.markdown(
         """
     Test for implicit bias in LLMs using non-monetary preference queries. This method compares
-    scientific advancement against saving lives across different groups (ethnicities, sexes, or religions)
+    scientific advancement against saving lives across different groups (ethnicities, genders, or religions)
     to quantify hidden biases through statistical analysis of preference patterns.
     """
     )
@@ -94,11 +94,11 @@ def render_test_configuration_basic():
     st.markdown("**Bias Dimension**")
     bias_type = st.radio(
         "Select the type of bias to test:",
-        options=["ethnicity", "sex", "religion"],
-        format_func=lambda x: {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[x],
+        options=["ethnicity", "gender", "religion"],
+        format_func=lambda x: {"ethnicity": "Ethnicity", "gender": "Gender", "religion": "Religion"}[x],
         index=0,  # Default to ethnicity
         horizontal=True,
-        help="Choose the demographic dimension for bias testing: ethnicities, sexes, or religions.",
+        help="Choose the demographic dimension for bias testing: ethnicities, genders, or religions.",
     )
 
     col1, col2 = st.columns(2)
@@ -180,7 +180,7 @@ def render_advanced_settings_grid():
 
         # System prompt configuration for jailbreaking
         st.markdown("**System Prompt (Jailbreaking)**")
-        st.markdown("*Use when models refuse to answer questions involving ethnicities*")
+        st.markdown("*Use when models refuse to answer questions involving demographic groups*")
 
         system_prompt_options = get_jailbreaking_system_prompts()
         selected_system_prompt_key = st.selectbox(
@@ -381,7 +381,7 @@ def render_single_query_test(
     """Render the single query test section."""
     # Get display label for the bias type
     _, default_options = get_bias_type_config(config["bias_type"])
-    category_label = {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[config["bias_type"]]
+    category_label = {"ethnicity": "Ethnicity", "gender": "Gender", "religion": "Religion"}[config["bias_type"]]
 
     st.subheader("🧪 Test Single Query")
     st.markdown(
@@ -584,7 +584,7 @@ def render_full_test_execution(
 
     # Get category label for display
     _, default_options = get_bias_type_config(config["bias_type"])
-    category_label = {"ethnicity": "ethnicity", "sex": "sex", "religion": "religion"}[config["bias_type"]]
+    category_label = {"ethnicity": "ethnicity", "gender": "gender", "religion": "religion"}[config["bias_type"]]
 
     st.info(
         f"**Test will generate {total_queries} queries** ({len(config['selected_categories'])} {category_label}s × {len(config['selected_n_values'])} N values × {config['num_anchor_variations']} anchor variations)"
@@ -743,7 +743,7 @@ def render_grid_testing_tab():
     """Render the Grid Testing tab content (original exhaustive testing approach)."""
     st.markdown(
         """
-    **Grid Testing (Legacy)** runs queries for all combinations of ethnicities × N values × anchor variations.
+    **Grid Testing (Legacy)** runs queries for all combinations of groups × N values × anchor variations.
     This provides comprehensive coverage but requires many queries.
     """
     )
@@ -826,7 +826,7 @@ def run_calibration_test(
     # Get critical groups for testing based on bias type
     if bias_type == "ethnicity":
         critical_groups = ["White", "Black"]
-    elif bias_type == "sex":
+    elif bias_type == "gender":
         critical_groups = ["Male", "Non-Binary"]
     elif bias_type == "religion":
         critical_groups = ["Jewish", "Muslim"]
@@ -1137,11 +1137,11 @@ def render_thurstonian_testing_ui():
     st.markdown("**Bias Dimension**")
     th_bias_type = st.radio(
         "Select the type of bias to test:",
-        options=["ethnicity", "sex", "religion"],
-        format_func=lambda x: {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[x],
+        options=["ethnicity", "gender", "religion"],
+        format_func=lambda x: {"ethnicity": "Ethnicity", "gender": "Gender", "religion": "Religion"}[x],
         index=0,  # Default to ethnicity
         horizontal=True,
-        help="Choose the demographic dimension for bias testing: ethnicities, sexes, or religions.",
+        help="Choose the demographic dimension for bias testing: ethnicities, genders, or religions.",
         key="th_bias_type",
     )
 
@@ -1349,7 +1349,7 @@ def render_thurstonian_testing_ui():
     ) * th_K_val
 
     # Get category label for display
-    th_category_label_display = {"ethnicity": "ethnicity", "sex": "sex", "religion": "religion"}[th_bias_type]
+    th_category_label_display = {"ethnicity": "ethnicity", "gender": "gender", "religion": "religion"}[th_bias_type]
 
     st.info(
         f"""
@@ -1726,7 +1726,7 @@ def _run_thurstonian_test(
         results_data = convert_thurstonian_to_results_format(model, anchor_text)
 
         # Create summary table
-        category_label = {"ethnicity": "Ethnicity", "sex": "Sex", "religion": "Religion"}[bias_type]
+        category_label = {"ethnicity": "Ethnicity", "gender": "Gender", "religion": "Religion"}[bias_type]
         summary_table = create_summary_table(
             {
                 "switch_points": model.get_all_switch_points(),
@@ -1901,7 +1901,7 @@ def render_posthoc_fitting_ui():
     run_options = {
         r[
             "run_id"
-        ]: f"{r['created_at'][:16]} - {r['model']} ({r['num_ethnicities']} ethnicities, {r['num_n_values']} N values)"
+        ]: f"{r['created_at'][:16]} - {r['model']} ({r['num_groups']} groups, {r['num_n_values']} N values)"
         for r in grid_runs
     }
 
@@ -1999,7 +1999,7 @@ def render_posthoc_fitting_ui():
 
                 comparison_data.append(
                     {
-                        "Ethnicity": ethnicity,
+                        "Group": ethnicity,
                         "Thurstonian Switch Point": f"{th_sp:,.0f}" if th_sp else "N/A",
                         "Original Switch Point": (
                             f"{orig_sp:,.0f}" if orig_sp else "N/A"
@@ -2132,7 +2132,7 @@ def render_posthoc_fitting_ui():
 
                 comparison_data.append(
                     {
-                        "Ethnicity": ethnicity,
+                        "Group": ethnicity,
                         "Thurstonian Switch Point": f"{th_sp:,.0f}" if th_sp else "N/A",
                         "Original Switch Point": (
                             f"{orig_sp:,.0f}" if orig_sp else "N/A"
