@@ -959,10 +959,13 @@ def run_calibration_test(
             "Strong anchor": 5
         }
 
-        # Start with moderately weak anchor (index 2)
+        # Start with moderately weak anchor (index 2), then navigate based on results
         current_anchor_idx = 2
         tested_anchors = set()
         best_anchor_key = None
+        # Track scores for all tested anchors so we can pick the best one
+        # Score = average of min(p_pct, q_pct) across groups (0 = fully one-sided, 50 = perfectly balanced)
+        anchor_scores = {}  # {anchor_key: {"score": float, "groups_with_range": int, "detail": str}}
 
         while current_anchor_idx >= 0 and current_anchor_idx <= 5 and current_anchor_idx not in tested_anchors:
             # Get current anchor key
@@ -1018,52 +1021,94 @@ def run_calibration_test(
                             # Ignore errors for anchor testing
                             pass
 
-            # Check if anchor provides good dynamic range
+            # Score this anchor based on dynamic range across all groups
             anchor_too_weak = False
             anchor_too_strong = False
-            anchor_balanced = False
+            all_groups_balanced = True
+            group_range_scores = []
+            groups_with_range = 0
+            detail_parts = []
 
             for group in critical_groups:
                 stats = group_responses[group]
                 if stats["total_valid"] > 0:
                     p_pct = stats["p_count"] / stats["total_valid"] * 100
                     q_pct = stats["q_count"] / stats["total_valid"] * 100
+                    # Dynamic range score: min(p_pct, q_pct) → 0 when one-sided, 50 when balanced
+                    range_score = min(p_pct, q_pct)
+                    group_range_scores.append(range_score)
+                    detail_parts.append(f"{group}: P={p_pct:.0f}%/Q={q_pct:.0f}% (range={range_score:.0f})")
 
-                    # Check if always P (anchor too weak) or always Q (anchor too strong)
+                    if range_score >= 5.0:
+                        groups_with_range += 1
+                    else:
+                        all_groups_balanced = False
+
                     if p_pct >= 95.0:
                         anchor_too_weak = True
                     elif q_pct >= 95.0:
                         anchor_too_strong = True
-                    else:
-                        # Has some variation - potentially balanced
-                        anchor_balanced = True
+                else:
+                    # No valid responses → worst score
+                    group_range_scores.append(0.0)
+                    all_groups_balanced = False
+                    detail_parts.append(f"{group}: no valid responses")
 
-            # Decision logic
-            if anchor_balanced and not anchor_too_weak and not anchor_too_strong:
-                # Found a balanced anchor
+            avg_range_score = sum(group_range_scores) / len(group_range_scores) if group_range_scores else 0.0
+            anchor_scores[current_anchor_key] = {
+                "score": avg_range_score,
+                "groups_with_range": groups_with_range,
+                "detail": "; ".join(detail_parts),
+            }
+
+            # Decision logic for navigation: early exit if all groups balanced, else navigate
+            if all_groups_balanced and not anchor_too_weak and not anchor_too_strong:
+                # Found a fully balanced anchor — use it immediately
                 best_anchor_key = current_anchor_key
                 status_text.text(f"✅ Found balanced anchor: {current_anchor_key}")
                 break
-            elif anchor_too_weak:
-                # Anchor too weak, move to stronger anchor
+            elif anchor_too_weak and not anchor_too_strong:
+                # Anchor too weak for at least one group, move to stronger anchor
                 current_anchor_idx += 1
-                status_text.text(f"⚠️ {current_anchor_key} too weak, trying stronger anchor...")
-            elif anchor_too_strong:
-                # Anchor too strong, move to weaker anchor
+                status_text.text(f"⚠️ {current_anchor_key} too weak for some groups, trying stronger anchor...")
+            elif anchor_too_strong and not anchor_too_weak:
+                # Anchor too strong for at least one group, move to weaker anchor
                 current_anchor_idx -= 1
-                status_text.text(f"⚠️ {current_anchor_key} too strong, trying weaker anchor...")
+                status_text.text(f"⚠️ {current_anchor_key} too strong for some groups, trying weaker anchor...")
             else:
-                # No clear signal, try stronger anchor
+                # Mixed signals or no clear direction — try stronger anchor
                 current_anchor_idx += 1
-                status_text.text(f"⚠️ {current_anchor_key} unclear, trying stronger anchor...")
+                status_text.text(f"⚠️ {current_anchor_key} mixed results, trying stronger anchor...")
 
         if best_anchor_key is None:
-            # Default to moderate anchor if none provide good range
-            best_anchor_key = "Moderate anchor"
-            if not warning_message:
-                warning_message = "⚠️ No anchor provided good dynamic range. Using moderate anchor."
+            # No anchor was perfectly balanced for all groups — pick the best-scoring one
+            if anchor_scores:
+                # Sort by: (1) number of groups with dynamic range (desc), (2) average range score (desc)
+                ranked = sorted(
+                    anchor_scores.items(),
+                    key=lambda x: (x[1]["groups_with_range"], x[1]["score"]),
+                    reverse=True,
+                )
+                best_anchor_key = ranked[0][0]
+                best_info = ranked[0][1]
+
+                if best_info["groups_with_range"] == 0:
+                    # None of the tested anchors showed dynamic range in any group
+                    warn = f"⚠️ No tested anchor showed good dynamic range. Using best available: {best_anchor_key} ({best_info['detail']})."
+                else:
+                    warn = f"ℹ️ No anchor was perfectly balanced for all groups. Selected best: {best_anchor_key} ({best_info['detail']})."
+
+                if not warning_message:
+                    warning_message = warn
+                else:
+                    warning_message += f" {warn}"
             else:
-                warning_message += " Also, no anchor provided good dynamic range. Using moderate anchor."
+                # Edge case: no anchors were tested at all
+                best_anchor_key = "Moderate anchor"
+                if not warning_message:
+                    warning_message = "⚠️ No anchors could be tested. Using moderate anchor as fallback."
+                else:
+                    warning_message += " Also, no anchors could be tested. Using moderate anchor as fallback."
 
         # ===== FINALIZE =====
         progress_bar.progress(1.0)
