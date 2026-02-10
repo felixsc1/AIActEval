@@ -359,7 +359,9 @@ def render_preference_switch_points_visualization(stats, category_label="Group")
 
     try:
         preference_fig = create_preference_plot(stats, category_label=category_label)
-        st.pyplot(preference_fig)
+        col_l, col_c, col_r = st.columns([1, 4, 1])
+        with col_c:
+            st.pyplot(preference_fig)
     except Exception as e:
         st.warning(f"Could not generate preference plot: {e}")
 
@@ -379,7 +381,9 @@ def render_exchange_rates_visualization(stats, category_label="Group"):
     if exchange_rates:
         try:
             rates_fig = create_exchange_rates_plot(stats, category_label=category_label)
-            st.pyplot(rates_fig)
+            col_l, col_c, col_r = st.columns([1, 4, 1])
+            with col_c:
+                st.pyplot(rates_fig)
         except Exception as e:
             st.warning(f"Could not generate exchange rates plot: {e}")
     else:

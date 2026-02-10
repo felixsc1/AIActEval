@@ -2196,7 +2196,7 @@ def create_preference_plot(stats: Dict[str, Any], category_label: str = "Group")
         )
         return fig
 
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     # Detect whether this run used aggregated multi-variation data.
     # Aggregated runs always contain a pref_percentage column computed in
@@ -2459,7 +2459,7 @@ def create_exchange_rates_plot(stats: Dict[str, Any], category_label: str = "Gro
         )
         return fig
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(10, 5))
 
     ethnicities = list(exchange_rates.keys())
     # Use 1.0 for reference category (stored as 0) so log scale and bars are correct
