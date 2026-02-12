@@ -750,7 +750,6 @@ def main():
                 key = f"pii_{vuln_type}"
                 st.checkbox(
                     f"**{vuln_type.replace('_', ' ').title()}**",
-                    value=st.session_state[key],
                     key=key,
                 )
                 st.caption(f"📋 {info['description']}")
@@ -763,7 +762,6 @@ def main():
                 key = f"bias_{vuln_type}"
                 st.checkbox(
                     f"**{vuln_type.title()}**",
-                    value=st.session_state[key],
                     key=key,
                 )
                 st.caption(f"📋 {info['description']}")
@@ -776,7 +774,6 @@ def main():
                 key = f"toxicity_{vuln_type}"
                 st.checkbox(
                     f"**{vuln_type.title()}**",
-                    value=st.session_state[key],
                     key=key,
                 )
                 st.caption(f"📋 {info['description']}")
@@ -789,7 +786,6 @@ def main():
                 key = f"misinfo_{vuln_type}"
                 st.checkbox(
                     f"**{vuln_type.replace('_', ' ').title()}**",
-                    value=st.session_state[key],
                     key=key,
                 )
                 st.caption(f"📋 {info['description']}")
@@ -802,7 +798,6 @@ def main():
                 key = f"robustness_{vuln_type}"
                 st.checkbox(
                     f"**{vuln_type.replace('_', ' ').title()}**",
-                    value=st.session_state[key],
                     key=key,
                 )
                 st.caption(f"📋 {info['description']}")
