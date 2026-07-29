@@ -6,6 +6,17 @@
 
 **SafeEval** is a compliance testing tool designed to evaluate Large Language Models (LLMs) against EU AI Act requirements. It leverages the **DeepTeam** library for automated red teaming and implements advanced **Thurstonian utility bias testing** to uncover implicit biases.
 
+## Watch the tutorials
+
+New to SafeEval? Start here — two short demos show how to use the tool end to end:
+
+| Tutorial | What you'll learn | Watch |
+| --- | --- | --- |
+| **Part 1 – Basic Evaluations** | App overview and DeepTeam red-teaming evaluations | [▶ Watch Part 1](https://github.com/felixsc1/AIActEval/releases/download/demo-videos-v1/SafeEval_Demo_part1_BasicEvaluations.mp4) |
+| **Part 2 – Utility Bias Testing** | Thurstonian utility bias testing walkthrough | [▶ Watch Part 2](https://github.com/felixsc1/AIActEval/releases/download/demo-videos-v1/SafeEval_Demo_part2_UtilityBiasTesting.mp4) |
+
+> Videos are hosted on the [Demo Videos / Tutorials release](https://github.com/felixsc1/AIActEval/releases/tag/demo-videos-v1). Click a link above to open/download the MP4 (GitHub READMEs cannot embed video players).
+
 ## Features
 
 - **Automated Red Teaming (DeepTeam)**:

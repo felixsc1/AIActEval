@@ -4,3 +4,5 @@ venv/
 __pycache__/
 .deepeval/
 /data/
+# Demo videos are hosted on GitHub Releases (not in git)
+assets/*.mp4
